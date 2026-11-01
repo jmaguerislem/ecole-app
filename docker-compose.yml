@@ -1,0 +1,23 @@
+# Démarrage complet : docker compose up --build   →   http://localhost:4000
+services:
+  db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: ecole, POSTGRES_PASSWORD: ecole, POSTGRES_DB: ecole }
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ecole"], interval: 5s, retries: 10 }
+  app:
+    build: .
+    depends_on: { db: { condition: service_healthy } }
+    ports: ["4000:4000"]
+    environment:
+      DATABASE_URL: postgres://ecole:ecole@db:5432/ecole
+      JWT_SECRET: ${JWT_SECRET:-remplacez-moi-par-une-longue-chaine-aleatoire-32-car-min}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@ecole.tn}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMoi!2026}
+      SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-super@ecole.tn}
+      SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-ChangeMoi!2026Super}
+      APP_URL: ${APP_URL:-http://localhost:4000}
+      UPLOAD_DIR: /data/uploads
+      RELANCES_CRON: "true"
+    volumes: [uploads:/data/uploads]
+volumes: { pgdata: {}, uploads: {} }
