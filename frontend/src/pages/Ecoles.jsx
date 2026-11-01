@@ -38,6 +38,15 @@ export default function Ecoles() {
     setErr(''); setOk('');
     try { await api(`/saas/schools/${s.id}`, { method: 'PUT', body: { status: suspendre ? 'suspended' : 'active' } }); load(); } catch (x) { setErr(x.message); }
   };
+  // Prolonge l'abonnement (à partir de la fin actuelle si elle est future, sinon d'aujourd'hui) et active l'école
+  const prolonger = async (s, mois) => {
+    const base = s.subscription_end && s.subscription_end > today ? new Date(s.subscription_end) : new Date(today);
+    base.setUTCMonth(base.getUTCMonth() + mois);
+    const fin = base.toISOString().slice(0, 10);
+    if (!window.confirm(`Prolonger « ${s.nom} » de ${mois} mois (jusqu'au ${fmtDate(fin)}) et passer en statut Actif ?`)) return;
+    setErr(''); setOk('');
+    try { await api(`/saas/schools/${s.id}`, { method: 'PUT', body: { status: 'active', subscription_end: fin } }); setOk(`Abonnement prolongé jusqu'au ${fmtDate(fin)}.`); load(); } catch (x) { setErr(x.message); }
+  };
   const f = (k) => (e) => setForm((s) => ({ ...s, [k]: e.target.value }));
   const fa = (k) => (e) => setForm((s) => ({ ...s, admin: { ...s.admin, [k]: e.target.value } }));
 
@@ -58,7 +67,8 @@ export default function Ecoles() {
               <td>{s.subscription_end ? fmtDate(s.subscription_end) : '—'}</td><td>{s.nb_utilisateurs}</td><td>{s.nb_eleves}</td>
               <td><button className="btn sec sm" onClick={() => navigator.clipboard?.writeText(lien(s)).then(() => setOk(`Lien copié : ${lien(s)}`))}>Copier le lien</button></td>
               <td className="row"><button className="btn sec sm" onClick={() => setEdit({ ...s, subscription_end: s.subscription_end || '' })}>Modifier</button>
-                <button className="btn sec sm" onClick={() => basculer(s)}>{s.status === 'suspended' ? 'Réactiver' : 'Suspendre'}</button></td>
+                <button className="btn sec sm" onClick={() => basculer(s)}>{s.status === 'suspended' ? 'Réactiver' : 'Suspendre'}</button>
+                <button className="btn sec sm" onClick={() => prolonger(s, 1)}>+1 mois</button><button className="btn sec sm" onClick={() => prolonger(s, 12)}>+1 an</button></td>
             </tr>))}
         </tbody>
       </table></div>

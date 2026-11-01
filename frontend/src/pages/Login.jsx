@@ -23,6 +23,7 @@ export default function Login() {
         <Alert>{err}</Alert>
         <button className="btn" disabled={busy} style={{ width: '100%' }}>{busy ? 'Connexion…' : 'Se connecter'}</button>
         <p className="small" style={{ marginTop: '1rem' }}>Nouvelle famille ? <Link to="/preinscription">Faire une demande de pré-inscription</Link></p>
+        <p className="small">Vous dirigez une école ? <Link to="/inscription">Essayez gratuitement pendant 30 jours</Link></p>
       </form>
     </div>
   );

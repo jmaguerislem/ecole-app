@@ -1,0 +1,28 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: ecole, POSTGRES_PASSWORD: ecole, POSTGRES_DB: ecole }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ecole" --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm --prefix backend ci
+      - run: npm --prefix backend test
+        env:
+          DATABASE_URL: postgres://ecole:ecole@localhost:5432/ecole
+  build-front:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm --prefix frontend ci || npm --prefix frontend install
+      - run: npm --prefix frontend run build

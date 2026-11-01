@@ -4,6 +4,7 @@ import { api, download, ROLES } from './api.js';
 import { useAuth } from './auth.jsx';
 import Login from './pages/Login.jsx';
 import Preinscription from './pages/Preinscription.jsx';
+import Inscription from './pages/Inscription.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import * as P from './pages/Entities.jsx';
 import Notes from './pages/Notes.jsx';
@@ -106,6 +107,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="/inscription" element={user ? <Navigate to="/" replace /> : <Inscription />} />
       <Route path="/preinscription" element={<Preinscription />} />
       <Route path="/preinscription/:slug" element={<Preinscription />} />
       <Route path="/" element={user?.role === 'superadmin' ? <Navigate to="/ecoles" replace /> : guard(<Dashboard />)} />

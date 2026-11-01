@@ -15,6 +15,7 @@ const { receiptPdf, bulletinPdf } = require('../services/pdf');
 const { ah, HttpError, pad, anneeDebut, checkNaissance, checkTelephone, eleveScope, teacherCanTeach, canAccessEleve, parentsOf } = require('../util');
 const config = require('../config');
 const V = require('../services/validate');
+const { verifierQuota } = require('../services/quotas');
 const { qa, runWith } = require('../db');
 const { abonnementBloque } = require('../auth');
 
@@ -221,6 +222,7 @@ elevesExtra.get('/export', allow('admin', 'comptable'), ah(async (_req, res) => 
 elevesExtra.post('/import', allow('admin', 'comptable'), memUpload.single('file'), ah(async (req, res) => {
   if (!req.file) throw new HttpError(400, 'Fichier CSV requis');
   const recs = parse(req.file.buffer.toString('utf8'), { columns: (h) => h.map((x) => x.trim().toLowerCase()), bom: true, skip_empty_lines: true, delimiter: [';', ','], trim: true });
+  await verifierQuota(req.user.school_id, 'eleves', recs.length);
   const classes = (await q(`SELECT id, ${CLASSE_NOM('c')} AS nom FROM classes c WHERE annee_scolaire=$1 AND deleted_at IS NULL`, [config.anneeCourante])).rows;
   let importes = 0; const erreurs = [];
   for (const [i, r] of recs.entries()) {

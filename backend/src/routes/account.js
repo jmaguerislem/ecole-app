@@ -2,7 +2,8 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const path = require('path');
-const { q, tx, qa, runWith } = require('../db');
+const { q, tx, qa, txa, runWith } = require('../db');
+const { slugify } = require('../migrate');
 const { sign, auth, allow, abonnementBloque } = require('../auth');
 const { audit } = require('../audit');
 const { ah, HttpError } = require('../util');
@@ -20,6 +21,24 @@ pub.get('/config', ah(async (req, res) => {
     if (s) nom = s.nom;
   }
   res.json({ anneeCourante: config.anneeCourante, ecoleNom: nom, vapidPublicKey: config.vapid?.pub || null });
+}));
+
+// Inscription libre-service d'une école : essai de 30 jours, formule Basic. (limitée par le rate-limit de /api/public)
+pub.post('/public/signup', ah(async (req, res) => {
+  const b = req.body || {};
+  const nom = V.libelle(b.nom, "Le nom de l'école", { required: true, max: 120 });
+  const email = V.email(b.email, "L'e-mail");
+  const motDePasse = V.motDePasse(b.password, 'Le mot de passe');
+  if ((await qa('SELECT 1 FROM users WHERE email=$1', [email])).rowCount) throw new HttpError(409, 'Cette adresse e-mail est déjà utilisée');
+  let slug = slugify(nom);
+  for (let i = 2; (await qa('SELECT 1 FROM schools WHERE slug=$1', [slug])).rowCount; i++) slug = `${slugify(nom).slice(0, 36)}-${i}`;
+  const fin = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+  const hash = await bcrypt.hash(motDePasse, 12);
+  await txa(async (cl) => {
+    const s = (await cl.query("INSERT INTO schools(nom,slug,status,plan,subscription_end) VALUES ($1,$2,'trial','basic',$3) RETURNING id", [nom, slug, fin])).rows[0];
+    await cl.query("INSERT INTO users(email,password_hash,role,nom,prenom,school_id) VALUES ($1,$2,'admin','Direction','École',$3)", [email, hash, s.id]);
+  });
+  res.status(201).json({ ok: true, slug, essai_jusqu_au: fin });
 }));
 
 pub.post('/auth/login', ah(async (req, res) => {

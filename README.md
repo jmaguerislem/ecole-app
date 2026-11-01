@@ -48,6 +48,12 @@ Chaque école est isolée des autres : un utilisateur ne voit et ne modifie que 
 - **Mise à jour d'une installation existante** : au premier démarrage, les données actuelles sont rattachées à la première école (nom = `ECOLE_NOM`), les fichiers sont rangés dans `uploads/<id-école>/`. **Faites une sauvegarde avant.** Les utilisateurs doivent se reconnecter une fois.
 - **Tests d'isolation** (deux écoles fictives, joués dans les deux sens) : `cd backend && DATABASE_URL=postgres://… npm test`. À relancer avant chaque mise à jour.
 
+### Inscription libre-service, formules et quotas
+- **Inscription d'une école** : page publique `/inscription` (route `POST /api/public/signup`). L'école est créée en statut *essai*, formule *Basic*, pour 30 jours ; la direction se connecte aussitôt.
+- **Quotas par formule** (`backend/src/services/quotas.js`) : Basic 50 élèves / 20 utilisateurs, Standard 200 / 80, Premium illimité. Au-delà, l'API répond 402 avec un message explicite (création, import CSV compris). Modifiez `LIMITES` pour ajuster.
+- **Abonnements manuels** : page *Écoles* → boutons **+1 mois / +1 an** (passent aussi l'école en statut *Actif*).
+- **Tests** : `backend/tests/saas.test.js` (inscription, quotas) en plus des tests d'isolation ; exécutés automatiquement par GitHub Actions (`.github/workflows/tests.yml`).
+
 ## Couverture du cahier des charges
 | Exigence | Réalisation |
 |---|---|

@@ -6,6 +6,7 @@ const { HttpError, checkNaissance, checkTelephone, eleveScope, teachSql, teacher
 const config = require('../config');
 const A = require('../services/absences');
 const V = require('../services/validate');
+const { verifierQuota } = require('../services/quotas');
 
 const STAFF = ['admin', 'enseignant', 'comptable'];
 const ALL = ['admin', 'enseignant', 'comptable', 'parent', 'eleve'];
@@ -21,6 +22,7 @@ const users = crud({
   order: 't.nom, t.prenom',
   scope: (u) => (u.role === 'comptable' ? "t.role='parent'" : null),
   async beforeSave({ data, body, isNew, old, user, client }) {
+    if (isNew) await verifierQuota(user.school_id, 'utilisateurs');
     checkTelephone(data.telephone);
     if (data.nom !== undefined) data.nom = V.nomPropre(data.nom, 'Le nom');
     if (data.prenom !== undefined) data.prenom = V.nomPropre(data.prenom, 'Le prénom');
@@ -141,7 +143,8 @@ const eleves = crud({
   columns: `t.*, ${CLASSE_NOM('c')} AS classe_nom, (SELECT COALESCE(array_agg(ep.parent_id),'{}'::int[]) FROM eleve_parents ep WHERE ep.eleve_id=t.id) AS parent_ids`,
   order: 't.nom, t.prenom',
   scope: (u, p) => eleveScope(p, u, 't.id'),
-  async beforeSave({ data, merged, client, old, body }) {
+  async beforeSave({ data, merged, client, old, body, isNew, user }) {
+    if (isNew) await verifierQuota(user.school_id, 'eleves');
     if (data.nom !== undefined) data.nom = V.nomPropre(data.nom, "Le nom de l'élève");
     if (data.prenom !== undefined) data.prenom = V.nomPropre(data.prenom, "Le prénom de l'élève");
     if (data.sexe !== undefined) data.sexe = V.choix(data.sexe, 'Le sexe', ['M', 'F']);
