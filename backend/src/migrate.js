@@ -18,6 +18,17 @@ function rangerFichiers(schoolId) {
   } catch (e) { console.warn('[migrate] Rangement des fichiers ignoré :', e.message); }
 }
 
+// Élèves créés avant l'ajout de l'e-mail : adresse générée une seule fois (unique), sans toucher aux autres données
+async function remplirEmailsEleves() {
+  const { genererEmailEleve } = require('./services/emailEleve');
+  const { rows } = await qa('SELECT id, nom, prenom, date_naissance, school_id FROM eleves WHERE email IS NULL ORDER BY id');
+  for (const e of rows) {
+    const email = await genererEmailEleve({ nom: e.nom, prenom: e.prenom, date_naissance: e.date_naissance, schoolId: e.school_id });
+    await qa('UPDATE eleves SET email=$1 WHERE id=$2 AND email IS NULL', [email, e.id]);
+  }
+  if (rows.length) console.log(`[migrate] E-mail généré pour ${rows.length} élève(s).`);
+}
+
 async function migrate() {
   await qa(sql('schema.sql'));
   // École par défaut : reçoit les données existantes avant le passage en multi-écoles
@@ -45,6 +56,8 @@ async function migrate() {
       console.log(`[migrate] Super-administrateur créé : ${process.env.SUPERADMIN_EMAIL}`);
     } else console.warn('[migrate] Aucun super-administrateur : définissez SUPERADMIN_EMAIL et SUPERADMIN_PASSWORD pour gérer les écoles.');
   }
+  await remplirEmailsEleves();
+  await require('./services/corrections-ecoles').appliquer();
   console.log('[migrate] Schéma à jour.');
 }
 

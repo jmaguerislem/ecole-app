@@ -26,6 +26,28 @@ const raw = multer({
   limits: { fileSize: 10 * 1024 * 1024, files: 10 },
   fileFilter: (_req, file, cb) => (ALLOWED.test(file.mimetype) ? cb(null, true) : cb(new HttpError(400, `Type de fichier non autorisé : ${file.originalname}`))),
 });
+// Photos : images uniquement, extension imposée par le type, signature du fichier vérifiée
+const IMG = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+const rawImg = multer({
+  storage: multer.diskStorage({
+    destination: (req, _f, cb) => {
+      if (!req.user?.school_id) return cb(new HttpError(403, 'Envoi de fichier impossible : aucune école'));
+      const dir = schoolDir(req.user.school_id); fs.mkdirSync(dir, { recursive: true }); cb(null, dir);
+    },
+    filename: (_r, file, cb) => cb(null, `${crypto.randomBytes(16).toString('hex')}.${IMG[file.mimetype]}`),
+  }),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  fileFilter: (_r, file, cb) => (IMG[file.mimetype] ? cb(null, true) : cb(new HttpError(400, 'Photo : formats JPEG, PNG ou WebP uniquement'))),
+});
+function imageValide(file) {
+  const b = fs.readFileSync(file.path).subarray(0, 12);
+  const ok = file.mimetype === 'image/jpeg' ? b[0] === 0xff && b[1] === 0xd8
+    : file.mimetype === 'image/png' ? b.subarray(0, 4).toString('hex') === '89504e47'
+      : b.subarray(0, 4).toString() === 'RIFF' && b.subarray(8, 12).toString() === 'WEBP';
+  if (!ok) fs.unlinkSync(file.path);
+  return ok;
+}
+const photoExiste = (name) => { const s = db.currentSchool(); return !!s?.schoolId && fs.existsSync(path.join(schoolDir(s.schoolId), path.basename(name))); };
 const rawMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 // Multer termine son travail dans un autre contexte asynchrone : on rétablit l'école de la session avant la suite du traitement.
@@ -33,6 +55,7 @@ const withSchool = (mw) => (req, res, next) => mw(req, res, (err) => (err ? next
 const wrap = (m) => ({ array: (...a) => withSchool(m.array(...a)), single: (...a) => withSchool(m.single(...a)), fields: (...a) => withSchool(m.fields(...a)) });
 const upload = wrap(raw);
 const memUpload = wrap(rawMem);
+const imageUpload = wrap(rawImg);
 
 const fileInfo = (f) => ({ name: f.filename, original: Buffer.from(f.originalname, 'latin1').toString('utf8'), size: f.size, mime: f.mimetype });
 const filesInfo = (arr) => (arr || []).map(fileInfo);
@@ -42,4 +65,4 @@ const removeFile = (name) => {
   return fs.promises.unlink(path.join(schoolDir(school.schoolId), path.basename(name))).catch(() => {});
 };
 
-module.exports = { upload, memUpload, fileInfo, filesInfo, removeFile };
+module.exports = { imageUpload, imageValide, photoExiste, upload, memUpload, fileInfo, filesInfo, removeFile };

@@ -7,6 +7,13 @@ const config = require('../config');
 const A = require('../services/absences');
 const V = require('../services/validate');
 const { verifierQuota } = require('../services/quotas');
+const { genererEmailEleve } = require('../services/emailEleve');
+const { assurerTarifsAnnee, historiser } = require('../services/tarifs');
+const { photoExiste, removeFile, imageUpload, imageValide } = require('../services/storage');
+const express = require('express');
+const { allow } = require('../auth');
+const { ah } = require('../util');
+const { audit } = require('../audit');
 
 const STAFF = ['admin', 'enseignant', 'comptable'];
 const ALL = ['admin', 'enseignant', 'comptable', 'parent', 'eleve'];
@@ -22,7 +29,7 @@ const users = crud({
   order: 't.nom, t.prenom',
   scope: (u) => (u.role === 'comptable' ? "t.role='parent'" : null),
   async beforeSave({ data, body, isNew, old, user, client }) {
-    if (isNew) await verifierQuota(user.school_id, 'utilisateurs');
+    if (isNew && data.role !== 'eleve') await verifierQuota(user.school_id, 'utilisateurs');
     checkTelephone(data.telephone);
     if (data.nom !== undefined) data.nom = V.nomPropre(data.nom, 'Le nom');
     if (data.prenom !== undefined) data.prenom = V.nomPropre(data.prenom, 'Le prénom');
@@ -35,6 +42,7 @@ const users = crud({
     if (isNew && !body.password) throw new HttpError(400, 'Mot de passe obligatoire');
     if (body.password) {
       V.motDePasse(body.password);
+      if (body.password_confirm !== undefined && body.password_confirm !== body.password) throw new HttpError(400, 'La confirmation du mot de passe ne correspond pas');
       data.password_hash = await bcrypt.hash(String(body.password), 12);
     }
     if (!isNew && old.id === user.id && (data.actif === false || (data.role && data.role !== old.role)))
@@ -135,9 +143,42 @@ const affectations = crud({
 });
 
 // ---------- Élèves ----------
+// Mot de passe du compte de connexion de l'élève : obligatoire (avec confirmation) à la création ; ensuite facultatif
+// (vide = inchangé ; renseigné = remplace le mot de passe, ou crée le compte d'un ancien élève qui n'en avait pas).
+function controlerMotDePasseEleve(body, { isNew }) {
+  const pw = body.password; const conf = body.password_confirm;
+  const vide = (v) => v === undefined || v === null || v === '';
+  if (typeof pw === 'object' || typeof conf === 'object') throw new HttpError(400, 'Mot de passe invalide');
+  if (vide(pw)) {
+    if (isNew) throw new HttpError(400, 'Le mot de passe est obligatoire');
+    if (!vide(conf)) throw new HttpError(400, 'Saisissez le mot de passe avant de le confirmer');
+    return null;
+  }
+  if (vide(conf)) throw new HttpError(400, 'La confirmation du mot de passe est obligatoire');
+  if (String(pw) !== String(conf)) throw new HttpError(400, 'La confirmation du mot de passe ne correspond pas');
+  V.motDePasse(pw, 'Le mot de passe');
+  return String(pw);
+}
+async function synchroniserCompteEleve({ client, user, old, data, merged, secret }) {
+  const nom = data.nom ?? merged.nom; const prenom = data.prenom ?? merged.prenom; // valeurs déjà nettoyées par beforeSave
+  if (old?.user_id) { // compte existant : nom/prénom suivent l'élève ; mot de passe remplacé seulement s'il est saisi
+    if (secret && user.role !== 'admin') throw new HttpError(403, "Seul l'administrateur peut changer le mot de passe d'un compte existant");
+    const hash = secret ? await bcrypt.hash(secret, 12) : null;
+    await client.query('UPDATE users SET nom=$2, prenom=$3, password_hash=COALESCE($4, password_hash) WHERE id=$1', [old.user_id, nom, prenom, hash]);
+    if (secret) await audit(client, user, 'password_reset', 'users', old.user_id, null, null);
+    return;
+  }
+  if (!secret) return; // ancien élève sans compte et aucun mot de passe saisi : rien à créer
+  const email = data.email ?? old?.email ?? merged.email;
+  if (secret.toLowerCase() === String(email).toLowerCase()) throw new HttpError(400, "Le mot de passe ne doit pas être identique à l'e-mail");
+  const u = (await client.query("INSERT INTO users(email,password_hash,role,nom,prenom) VALUES ($1,$2,'eleve',$3,$4) RETURNING id,email,role,nom,prenom,actif",
+    [email, await bcrypt.hash(secret, 12), nom, prenom])).rows[0];
+  await audit(client, user, 'create', 'users', u.id, null, u);
+  data.user_id = u.id;
+}
 const eleves = crud({
   table: 'eleves', read: ALL, write: ['admin', 'comptable'],
-  fields: ['matricule', 'nom', 'prenom', 'date_naissance', 'sexe', 'adresse', 'photo', 'antecedents_medicaux', 'annee_entree', 'classe_id', 'user_id', 'statut'],
+  fields: ['matricule', 'nom', 'prenom', 'date_naissance', 'sexe', 'adresse', 'photo', 'antecedents_medicaux', 'annee_entree', 'classe_id', 'statut'], // user_id (compte de connexion) n'est jamais fourni par le client : il est créé et lié ici
   required: ['nom', 'prenom'], filters: ['classe_id', 'statut'], searchFields: ['t.nom', 't.prenom', 't.matricule'],
   from: 'eleves t LEFT JOIN classes c ON c.id=t.classe_id',
   columns: `t.*, ${CLASSE_NOM('c')} AS classe_nom, (SELECT COALESCE(array_agg(ep.parent_id),'{}'::int[]) FROM eleve_parents ep WHERE ep.eleve_id=t.id) AS parent_ids`,
@@ -145,21 +186,21 @@ const eleves = crud({
   scope: (u, p) => eleveScope(p, u, 't.id'),
   async beforeSave({ data, merged, client, old, body, isNew, user }) {
     if (isNew) await verifierQuota(user.school_id, 'eleves');
+    const secret = controlerMotDePasseEleve(body, { isNew });
     if (data.nom !== undefined) data.nom = V.nomPropre(data.nom, "Le nom de l'élève");
     if (data.prenom !== undefined) data.prenom = V.nomPropre(data.prenom, "Le prénom de l'élève");
     if (data.sexe !== undefined) data.sexe = V.choix(data.sexe, 'Le sexe', ['M', 'F']);
     if (data.statut !== undefined) V.choix(data.statut, 'Le statut', ['actif', 'inactif', 'diplome'], { required: true });
     if (data.adresse !== undefined) data.adresse = V.texte(data.adresse, "L'adresse", { max: 200 });
     if (data.antecedents_medicaux !== undefined) data.antecedents_medicaux = V.texte(data.antecedents_medicaux, 'Les antécédents médicaux', { max: 1000, multiligne: true });
-    if (data.photo !== undefined) data.photo = V.url(data.photo, 'La photo');
+    if (data.photo !== undefined) {
+      data.photo = V.photo(data.photo, 'La photo');
+      if (data.photo?.startsWith('/api/files/') && !photoExiste(data.photo.slice(11))) throw new HttpError(400, 'Photo introuvable : renvoyez-la');
+    }
     if (data.annee_entree !== undefined) data.annee_entree = V.annee(data.annee_entree, "L'année d'entrée");
     if (data.matricule !== undefined) {
       data.matricule = V.texte(data.matricule, 'Le matricule', { max: 20, re: /^[A-Za-z0-9-]+$/, reMsg: 'Le matricule : lettres, chiffres et tirets uniquement' })?.toUpperCase() ?? null;
       if (data.matricule && (await client.query('SELECT 1 FROM eleves WHERE matricule=$1 AND deleted_at IS NULL AND id<>$2', [data.matricule, old?.id || 0])).rowCount) throw new HttpError(409, 'Ce matricule est déjà utilisé');
-    }
-    if (data.user_id) {
-      if (!(await client.query("SELECT 1 FROM users WHERE id=$1 AND role='eleve' AND deleted_at IS NULL", [data.user_id])).rowCount) throw new HttpError(400, "Le compte de connexion doit être un compte de rôle « Élève »");
-      if ((await client.query('SELECT 1 FROM eleves WHERE user_id=$1 AND deleted_at IS NULL AND id<>$2', [data.user_id, old?.id || 0])).rowCount) throw new HttpError(409, 'Ce compte est déjà lié à un autre élève');
     }
     if (body.parent_ids !== undefined) {
       const ids = V.entiersId(body.parent_ids, 'Les parents', { max: 4 });
@@ -173,6 +214,17 @@ const eleves = crud({
       if (c.n >= c.capacite) throw new HttpError(409, `Capacité maximale de la classe atteinte (${c.capacite})`);
     }
     if (!merged.annee_entree && !old) data.annee_entree = config.anneeCourante;
+    // E-mail : toujours généré par le serveur (jamais saisi), unique ; conservé tel quel pour un élève qui en a déjà un
+    if (!old?.email) data.email = await genererEmailEleve({ nom: merged.nom, prenom: merged.prenom, date_naissance: merged.date_naissance, exceptEleveId: old?.id || 0 });
+    // Compte de connexion : créé automatiquement (e-mail de l'élève = identifiant, mot de passe haché bcrypt), ou mis à jour
+    await synchroniserCompteEleve({ client, user, old, data, merged, secret });
+  },
+  beforeDelete({ client, old }) {
+    // Un élève supprimé ne doit plus pouvoir se connecter (le compte est désactivé, pas détruit : l'historique reste lisible)
+    return old.user_id ? client.query('UPDATE users SET actif=FALSE WHERE id=$1', [old.user_id]) : null;
+  },
+  async afterCommit({ row, old }) {
+    if (old?.photo && old.photo !== row.photo && old.photo.startsWith('/api/files/')) await removeFile(old.photo.slice(11));
   },
   async afterSave({ client, row, body, isNew }) {
     if (isNew && !row.matricule) {
@@ -186,18 +238,58 @@ const eleves = crud({
 });
 
 // ---------- Tarifs ----------
+// Scolarité : un prix par niveau et par année (+50 DT automatiques chaque année). Toute modification est historisée.
 const tarifs = crud({
-  table: 'tarifs', fields: ['libelle', 'type', 'niveau', 'montant', 'echeance'], required: ['libelle', 'montant'], annee: true,
-  read: ['admin', 'comptable'], write: ['admin', 'comptable'], order: 't.type, t.echeance NULLS LAST, t.id',
-  async beforeSave({ data, merged }) {
+  table: 'tarifs', fields: ['libelle', 'type', 'niveau', 'montant', 'echeance'], required: ['libelle', 'montant'], annee: true, filters: ['type', 'niveau'],
+  read: ['admin', 'comptable'], write: ['admin', 'comptable'], order: 't.type, t.niveau NULLS LAST, t.echeance NULLS LAST, t.id',
+  async beforeSave({ data, merged, client, old }) {
     if (data.libelle !== undefined) data.libelle = V.libelle(data.libelle, 'Le libellé', { required: true });
     if (data.type !== undefined) V.choix(data.type, 'Le type', ['inscription', 'scolarite', 'tranche', 'autre'], { required: true });
     if (data.niveau !== undefined) data.niveau = V.choix(data.niveau, 'Le niveau', V.NIVEAUX);
     if (data.montant !== undefined) data.montant = V.nombre(data.montant, 'Le montant', { min: 0.01, max: 100000, required: true });
     if (data.echeance !== undefined) { const b = V.bornesAnnee(merged.annee_scolaire); data.echeance = V.date(data.echeance, "L'échéance", { min: b.debut, max: b.fin }); }
+    const niveau = 'niveau' in data ? data.niveau : merged.niveau;
+    const type = data.type ?? merged.type;
+    if (type === 'scolarite') {
+      if (!niveau) throw new HttpError(400, 'La scolarité doit être rattachée à un niveau : chaque niveau a son propre prix');
+      const dup = await client.query("SELECT 1 FROM tarifs WHERE type='scolarite' AND niveau=$1 AND annee_scolaire=$2 AND deleted_at IS NULL AND id<>$3", [niveau, merged.annee_scolaire, old?.id || 0]);
+      if (dup.rowCount) throw new HttpError(409, `Le tarif de scolarité « ${niveau} » existe déjà pour ${merged.annee_scolaire} : modifiez-le.`);
+    }
   },
+  async afterSave({ client, row, old, isNew, user }) {
+    if (isNew) await historiser(client, { tarif: row, nouveau: row.montant, motif: 'creation', userId: user.id });
+    else if (Number(old.montant) !== Number(row.montant)) await historiser(client, { tarif: row, ancien: old.montant, nouveau: row.montant, motif: 'modification', userId: user.id });
+  },
+  async beforeDelete({ client, old, user }) { await historiser(client, { tarif: old, ancien: old.montant, motif: 'suppression', userId: user.id }); },
   deleteChecks: [{ sql: refCount('paiements WHERE tarif_id=$1 AND deleted_at IS NULL'), message: 'Des paiements sont liés à ce tarif.' }],
 });
+// Routes annexes (montées AVANT le CRUD) : génération automatique à l'ouverture d'une année, historique
+const tarifsExtra = express.Router();
+tarifsExtra.get('/', allow('admin', 'comptable'), ah(async (req, _res, next) => { if (req.query.annee !== 'all') await assurerTarifsAnnee(req.query.annee || config.anneeCourante); next(); }));
+tarifsExtra.post('/generer', allow('admin', 'comptable'), ah(async (req, res) => {
+  const annee = V.annee(req.body?.annee) || config.anneeCourante;
+  const crees = await assurerTarifsAnnee(annee, { force: true });
+  res.json({ annee, crees: crees.length });
+}));
+tarifsExtra.get('/historique', allow('admin', 'comptable'), ah(async (req, res) => {
+  const params = []; const where = [];
+  if (req.query.niveau) { params.push(String(req.query.niveau)); where.push(`h.niveau=$${params.length}`); }
+  const { rows } = await q(`SELECT h.*, u.nom||' '||u.prenom AS utilisateur FROM tarifs_historique h LEFT JOIN users u ON u.id=h.user_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY h.id DESC LIMIT 500`, params);
+  res.json(rows);
+}));
+
+// ---------- Photo d'élève (envoi depuis le PC ou capture caméra) ----------
+const elevesPhoto = express.Router();
+// Aperçu de l'e-mail qui sera attribué (l'adresse définitive est toujours recalculée à l'enregistrement)
+elevesPhoto.get('/email-suggestion', allow('admin', 'comptable'), ah(async (req, res) => {
+  const nom = V.nomPropre(req.query.nom, 'Le nom'); const prenom = V.nomPropre(req.query.prenom, 'Le prénom');
+  res.json({ email: await genererEmailEleve({ nom, prenom, date_naissance: req.query.date_naissance }) });
+}));
+elevesPhoto.post('/photo', allow('admin', 'comptable'), imageUpload.single('photo'), ah(async (req, res) => {
+  if (!req.file) throw new HttpError(400, 'Aucune image reçue');
+  if (!imageValide(req.file)) throw new HttpError(400, "Ce fichier n'est pas une image valide");
+  res.status(201).json({ photo: `/api/files/${req.file.filename}` });
+}));
 
 // ---------- Évaluations ----------
 const evaluations = crud({
@@ -261,4 +353,4 @@ const absences = crud({
   },
 });
 
-module.exports = { users, classes, matieres, salles, affectations, eleves, tarifs, evaluations, absences };
+module.exports = { tarifsExtra, elevesPhoto, users, classes, matieres, salles, affectations, eleves, tarifs, evaluations, absences };

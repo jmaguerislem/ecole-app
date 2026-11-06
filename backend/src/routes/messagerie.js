@@ -136,17 +136,30 @@ const annonces = express.Router();
 const AUD_ROLE = { parents: 'parent', enseignants: 'enseignant', eleves: 'eleve' };
 annonces.get('/', ah(async (req, res) => {
   const u = req.user;
-  const where = u.role === 'admin' ? 'TRUE' : `a.audience='tous' OR a.audience=${u.role === 'parent' ? "'parents'" : u.role === 'enseignant' ? "'enseignants'" : u.role === 'eleve' ? "'eleves'" : "'tous'"}`;
-  res.json((await q(`SELECT a.*, u.nom||' '||u.prenom AS auteur_nom FROM annonces a JOIN users u ON u.id=a.auteur_id WHERE ${where} ORDER BY a.created_at DESC LIMIT 200`)).rows);
+  const own = { parent: 'parents', enseignant: 'enseignants', eleve: 'eleves' }[u.role];
+  const where = u.role === 'admin' ? 'TRUE' : `(a.audience='tous' ${own ? `OR a.audience='${own}'` : ''} OR (a.audience='personne' AND $1 = ANY(a.destinataire_ids)))`;
+  const rows = (await q(`SELECT a.*, u.nom||' '||u.prenom AS auteur_nom,
+      (SELECT string_agg(d.nom||' '||d.prenom, ', ' ORDER BY d.nom) FROM users d WHERE d.id = ANY(a.destinataire_ids)) AS destinataires_noms
+    FROM annonces a JOIN users u ON u.id=a.auteur_id WHERE ${where} ORDER BY a.created_at DESC LIMIT 200`, u.role === 'admin' ? [] : [u.id])).rows;
+  // La liste nominative des destinataires n'est visible que de l'administrateur
+  res.json(rows.map((r) => (u.role === 'admin' ? r : { ...r, destinataire_ids: undefined, destinataires_noms: undefined })));
 }));
 annonces.post('/', allow('admin'), ah(async (req, res) => {
   const audience = req.body?.audience || 'tous';
   const titre = V.texte(req.body?.titre, 'Le titre', { required: true, min: 3, max: 120 });
   const corps = V.texte(req.body?.corps, 'Le contenu', { required: true, min: 3, max: 5000, multiligne: true });
-  if (!['tous', 'parents', 'enseignants', 'eleves'].includes(audience)) throw new HttpError(400, 'Audience invalide');
-  const a = (await q('INSERT INTO annonces(auteur_id,titre,corps,audience) VALUES ($1,$2,$3,$4) RETURNING *', [req.user.id, titre, corps, audience])).rows[0];
+  if (!['tous', 'parents', 'enseignants', 'eleves', 'personne'].includes(audience)) throw new HttpError(400, 'Audience invalide');
+  let ids = null;
+  if (audience === 'personne') {
+    ids = V.entiersId(req.body?.destinataire_ids ?? [], 'Les destinataires', { max: 100 });
+    if (!ids.length) throw new HttpError(400, 'Choisissez au moins un destinataire');
+    const ok = (await q('SELECT COUNT(*) n FROM users WHERE id = ANY($1::int[]) AND actif AND deleted_at IS NULL AND role<>\'superadmin\'', [ids])).rows[0].n;
+    if (ok < ids.length) throw new HttpError(400, 'Un des destinataires est introuvable ou inactif');
+  }
+  const a = (await q('INSERT INTO annonces(auteur_id,titre,corps,audience,destinataire_ids) VALUES ($1,$2,$3,$4,$5) RETURNING *', [req.user.id, titre, corps, audience, ids])).rows[0];
   await audit(null, req.user, 'create', 'annonces', a.id, null, a);
-  const targets = (await q(`SELECT id FROM users WHERE actif AND deleted_at IS NULL AND id<>$1 ${audience === 'tous' ? '' : 'AND role=$2'}`, audience === 'tous' ? [req.user.id] : [req.user.id, AUD_ROLE[audience]])).rows.map((r) => r.id);
+  const targets = audience === 'personne' ? ids.filter((i) => i !== req.user.id)
+    : (await q(`SELECT id FROM users WHERE actif AND deleted_at IS NULL AND id<>$1 ${audience === 'tous' ? '' : 'AND role=$2'}`, audience === 'tous' ? [req.user.id] : [req.user.id, AUD_ROLE[audience]])).rows.map((r) => r.id);
   notify(targets, { type: 'annonce', titre: `Annonce : ${titre}`, corps: corps.slice(0, 140), lien: '/annonces' }, { email: true }).catch(() => {});
   res.status(201).json(a);
 }));

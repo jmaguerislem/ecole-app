@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, fmtDate } from '../api.js';
-import { Alert } from '../components/ui.jsx';
+import Icon from '../components/Icon.jsx';
+import { Alert, PageHeader } from '../components/ui.jsx';
 
 export default function Notes() {
   const { id } = useParams();
@@ -17,9 +18,8 @@ export default function Notes() {
   const ev = data.evaluation;
   return (
     <div>
-      <p><Link to="/evaluations">← Évaluations</Link></p>
-      <h1>{ev.titre}</h1>
-      <p className="muted">{ev.classe_nom} – {ev.matiere_nom} – Trimestre {ev.trimestre} – {fmtDate(ev.date_eval)} – barème /{ev.bareme}</p>
+      <Link className="back-link" to="/evaluations"><Icon name="arrow-left" size={16} />Évaluations</Link>
+      <PageHeader title={ev.titre} subtitle={`${ev.classe_nom} – ${ev.matiere_nom} – Trimestre ${ev.trimestre} – ${fmtDate(ev.date_eval)} – barème /${ev.bareme}`} />
       <Alert>{err}</Alert><Alert kind="ok">{ok}</Alert>
       <div className="table-wrap"><table className="notes-grid"><thead><tr><th>Élève</th><th>Note /{ev.bareme}</th><th>Commentaire</th></tr></thead><tbody>
         {data.eleves.map((e) => (
@@ -28,7 +28,7 @@ export default function Notes() {
             <td><input aria-label={`Commentaire pour ${e.prenom} ${e.nom}`} maxLength={300} value={vals[e.eleve_id]?.commentaire ?? ''} onChange={(x) => setVals((s) => ({ ...s, [e.eleve_id]: { ...s[e.eleve_id], commentaire: x.target.value } }))} style={{ maxWidth: 'none' }} /></td></tr>))}
         {data.eleves.length === 0 && <tr><td colSpan="3" className="empty">Aucun élève dans cette classe.</td></tr>}
       </tbody></table></div>
-      <div className="row" style={{ marginTop: '1rem' }}><button className="btn" onClick={save}>Enregistrer les notes</button></div>
+      <div className="modal-actions"><button type="button" className="btn" onClick={save}><Icon name="check" size={16} />Enregistrer les notes</button></div>
     </div>
   );
 }

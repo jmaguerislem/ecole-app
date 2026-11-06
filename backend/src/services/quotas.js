@@ -16,7 +16,9 @@ async function verifierQuota(schoolId, type, ajout = 1) {
   const limite = (LIMITES[s.plan] || LIMITES.basic)[type];
   if (limite === Infinity) return;
   const table = type === 'eleves' ? 'eleves' : 'users';
-  const { n } = (await qa(`SELECT COUNT(*) AS n FROM ${table} WHERE school_id=$1 AND deleted_at IS NULL`, [schoolId])).rows[0];
+  // Chaque élève a désormais son compte de connexion : ces comptes sont couverts par le quota « élèves », pas par « utilisateurs »
+  const filtre = type === 'utilisateurs' ? " AND role <> 'eleve'" : '';
+  const { n } = (await qa(`SELECT COUNT(*) AS n FROM ${table} WHERE school_id=$1 AND deleted_at IS NULL${filtre}`, [schoolId])).rows[0];
   if (n + ajout > limite)
     throw new HttpError(402, `Limite de votre formule atteinte (${limite} ${type === 'eleves' ? 'élèves' : 'utilisateurs'}). Contactez la plateforme pour passer à la formule supérieure.`);
 }

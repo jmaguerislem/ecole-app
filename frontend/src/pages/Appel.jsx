@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmtDate } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import { Alert, Pill } from '../components/ui.jsx';
+import Icon from '../components/Icon.jsx';
+import { Alert, Avatar, PageHeader, Pill, Spinner } from '../components/ui.jsx';
 
 const MOTIF_MAX = 200;
 const RETRO_JOURS_ENSEIGNANT = 30;
@@ -12,7 +13,7 @@ const addJours = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); 
 
 export default function Appel() {
   const { user, config } = useAuth();
-  const admin = user.role === 'admin';
+  const admin = false; // page réservée aux enseignants
   const today = iso(new Date());
   const debutAnnee = `${String(config.anneeCourante || '').slice(0, 4) || new Date().getFullYear()}-09-01`;
   const minDate = admin ? debutAnnee : iso(addJours(new Date(), -RETRO_JOURS_ENSEIGNANT));
@@ -73,12 +74,11 @@ export default function Appel() {
     } catch (e) { setErr(e.message); } finally { setSaving(false); }
   };
 
-  if (classes === null) return <p>Chargement…</p>;
+  if (classes === null) return <Spinner />;
   return (
     <div>
-      <h1>Faire l'appel</h1>
-      <p className="muted">Choisissez la classe et la date, puis cliquez sur chaque élève absent. Les élèves non cochés sont considérés présents.</p>
-      <div className="card row" style={{ alignItems: 'flex-end' }}>
+      <PageHeader title="Faire l'appel" subtitle="Choisissez la classe et la date, puis touchez chaque élève absent. Les élèves non cochés sont considérés présents." />
+      <div className="card appel-bar">
         <div style={{ minWidth: 220, flex: 1 }}>
           <label htmlFor="appel-classe">Classe</label>
           <select id="appel-classe" value={classeId} onChange={(e) => { if (confirmLeave()) setClasseId(e.target.value); }}>
@@ -96,11 +96,11 @@ export default function Appel() {
 
       {classeId && !dateErr && (
         <>
-          <div className="row between" style={{ margin: '.5rem 0' }}>
-            <div aria-live="polite"><strong>{eleves.length - nbAbsents}</strong> présent(s) · <strong>{nbAbsents}</strong> absent(s) sur {eleves.length}</div>
-            <button type="button" className="btn sec sm" onClick={tousPresents} disabled={loading || !nbAbsents}>Tous présents</button>
+          <div className="row between" style={{ margin: '.5rem 0 .75rem' }}>
+            <div className="counter" aria-live="polite"><span><strong>{eleves.length - nbAbsents}</strong> présent(s)</span><span><strong>{nbAbsents}</strong> absent(s)</span><span className="muted">sur {eleves.length}</span></div>
+            <button type="button" className="btn sec sm" onClick={tousPresents} disabled={loading || !nbAbsents}><Icon name="check" size={14} />Tous présents</button>
           </div>
-          {loading ? <p className="muted">Chargement des élèves…</p> : (
+          {loading ? <Spinner label="Chargement des élèves…" /> : (
             <ul className="appel-list">
               {eleves.map((e) => {
                 const v = etat[e.eleve_id]; if (!v) return null;
@@ -108,12 +108,13 @@ export default function Appel() {
                   <li key={e.eleve_id} className={`appel-row${v.absent ? ' absent' : ''}`}>
                     <button type="button" className="appel-toggle" aria-pressed={v.absent} disabled={v.verrou} onClick={() => toggle(e.eleve_id)}
                       aria-label={`${e.nom} ${e.prenom} : ${v.absent ? 'absent' : 'présent'}. Cliquer pour changer.`}>
-                      <span>{e.nom} {e.prenom}</span>
-                      <span>{v.justifiee && <Pill kind="ok">Justifiée</Pill>} <Pill kind={v.absent ? 'bad' : 'ok'}>{v.absent ? 'Absent' : 'Présent'}</Pill></span>
+                      <Avatar prenom={e.prenom} nom={e.nom} size={40} />
+                      <span className="appel-name">{e.nom} {e.prenom}</span>
+                      <span className="appel-state">{v.justifiee && <Pill kind="ok">Justifiée</Pill>}<Pill kind={v.absent ? 'bad' : 'ok'}>{v.absent ? 'Absent' : 'Présent'}</Pill></span>
                     </button>
                     {v.absent && (
                       <div className="appel-detail">
-                        <select aria-label={`Période d'absence de ${e.prenom} ${e.nom}`} value={v.periode} disabled={v.verrou} onChange={(x) => set(e.eleve_id, { periode: x.target.value })} style={{ maxWidth: 160 }}>
+                        <select aria-label={`Période d'absence de ${e.prenom} ${e.nom}`} value={v.periode} disabled={v.verrou} onChange={(x) => set(e.eleve_id, { periode: x.target.value })} style={{ maxWidth: 170 }}>
                           {PERIODES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
                         </select>
                         <input aria-label={`Motif de l'absence de ${e.prenom} ${e.nom} (facultatif)`} placeholder="Motif (facultatif)" maxLength={MOTIF_MAX} value={v.motif} disabled={v.verrou} onChange={(x) => set(e.eleve_id, { motif: x.target.value })} />
@@ -122,12 +123,12 @@ export default function Appel() {
                   </li>
                 );
               })}
-              {eleves.length === 0 && <li className="empty">Aucun élève actif dans cette classe.</li>}
+              {eleves.length === 0 && <li className="card empty">Aucun élève actif dans cette classe.</li>}
             </ul>
           )}
-          <div className="row" style={{ marginTop: '1rem' }}>
-            <button type="button" className="btn" onClick={save} disabled={saving || loading || !dirty || eleves.length === 0}>{saving ? 'Enregistrement…' : "Enregistrer l'appel"}</button>
-            {!dirty && !loading && eleves.length > 0 && <span className="muted small">Aucune modification à enregistrer.</span>}
+          <div className="sticky-bar">
+            <span className="muted small">{!dirty && !loading && eleves.length > 0 ? 'Aucune modification à enregistrer.' : dirty ? 'Modifications non enregistrées.' : ''}</span>
+            <button type="button" className="btn" onClick={save} disabled={saving || loading || !dirty || eleves.length === 0}>{saving ? <><span className="spinner" aria-hidden="true" />Enregistrement…</> : <><Icon name="check" size={16} />Enregistrer l'appel</>}</button>
           </div>
         </>
       )}

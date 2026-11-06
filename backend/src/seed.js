@@ -38,7 +38,9 @@ async function seed() {
   await cren(cp, fr, ens1, s1, 1, '08:00', '09:00'); await cren(cp, ma, ens1, s1, 1, '09:15', '10:15'); await cren(cp, ar, ens1, s1, 2, '08:00', '09:00');
   await cren(ce1, fr, ens2, s2, 1, '08:00', '09:00'); await cren(ce1, ma, ens2, s2, 2, '09:00', '10:00');
   const tar = async (l, t, m) => (await q('INSERT INTO tarifs(annee_scolaire,libelle,type,montant) VALUES ($1,$2,$3,$4) RETURNING id', [A, l, t, m])).rows[0].id;
-  const tIns = await tar('Frais d\'inscription', 'inscription', 100); await tar('Scolarité – tranche 1', 'tranche', 300); await tar('Scolarité – tranche 2', 'tranche', 300);
+  const tIns = await tar('Frais d\'inscription', 'inscription', 100);
+  const NIV = ['1ère année', '2ème année', '3ème année', '4ème année', '5ème année', '6ème année']; // un prix par niveau (+50 DT/an ensuite, automatique)
+  for (const [i, n] of NIV.entries()) await q("INSERT INTO tarifs(annee_scolaire,libelle,type,niveau,montant) VALUES ($1,$2,'scolarite',$3,$4)", [A, `Scolarité – ${n}`, n, 600 + 50 * i]);
   const pay = (e, m, mode) => q("INSERT INTO paiements(eleve_id,tarif_id,montant,mode,annee_scolaire,created_by,numero_recu) VALUES ($1,$2,$3,$4,$5,$6,$7)", [eleves[e], tIns, m, mode, A, compta, `REC-${A.slice(0, 4)}-DEMO${e}`]);
   await pay(0, 100, 'especes'); await pay(1, 400, 'virement');
   for (const [c, m, t] of [[cp, fr, 'Dictée 1'], [cp, ma, 'Contrôle calcul'], [cp, fr, 'Lecture']]) {

@@ -16,6 +16,7 @@ const { ah, HttpError, pad, anneeDebut, checkNaissance, checkTelephone, eleveSco
 const config = require('../config');
 const V = require('../services/validate');
 const { verifierQuota } = require('../services/quotas');
+const { genererEmailEleve } = require('../services/emailEleve');
 const { qa, runWith } = require('../db');
 const { abonnementBloque } = require('../auth');
 
@@ -235,9 +236,10 @@ elevesExtra.post('/import', allow('admin', 'comptable'), memUpload.single('file'
       r.matricule = (V.texte(r.matricule, 'matricule', { max: 20, re: /^[A-Za-z0-9-]+$/, reMsg: 'matricule : lettres, chiffres et tirets' }) || '').toUpperCase();
       const cl = r.classe ? classes.find((c) => c.nom.toLowerCase() === r.classe.toLowerCase()) : null;
       if (r.classe && !cl) throw new Error(`classe inconnue « ${r.classe} »`);
+      const email = await genererEmailEleve({ nom: r.nom, prenom: r.prenom, date_naissance: r.date_naissance });
       const ins = await q(
-        `INSERT INTO eleves(matricule,nom,prenom,date_naissance,sexe,adresse,annee_entree,classe_id) VALUES (NULLIF($1,''),$2,$3,NULLIF($4,'')::date,NULLIF($5,''),NULLIF($6,''),$7,$8) RETURNING id`,
-        [r.matricule || '', r.nom, r.prenom, r.date_naissance || '', r.sexe || '', r.adresse || '', r.annee_entree || config.anneeCourante, cl ? cl.id : null]);
+        `INSERT INTO eleves(matricule,nom,prenom,date_naissance,sexe,adresse,annee_entree,classe_id,email) VALUES (NULLIF($1,''),$2,$3,NULLIF($4,'')::date,NULLIF($5,''),NULLIF($6,''),$7,$8,$9) RETURNING id`,
+        [r.matricule || '', r.nom, r.prenom, r.date_naissance || '', r.sexe || '', r.adresse || '', r.annee_entree || config.anneeCourante, cl ? cl.id : null, email]);
       await q("UPDATE eleves SET matricule=COALESCE(matricule,$1) WHERE id=$2", [`E${anneeDebut(config.anneeCourante)}${pad(ins.rows[0].id, 4)}`, ins.rows[0].id]);
       importes++;
     } catch (e) { erreurs.push({ ligne: i + 2, message: e.message }); }
@@ -312,8 +314,9 @@ preActions.post('/:id(\\d+)/valider', allow('admin', 'comptable'), ah(async (req
       classe_id = req.body.classe_id;
     }
     const el = (await cl.query(
-      'INSERT INTO eleves(nom,prenom,date_naissance,sexe,adresse,antecedents_medicaux,annee_entree,classe_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
-      [p.eleve_nom, p.eleve_prenom, p.date_naissance, p.sexe, p.adresse, p.antecedents_medicaux, p.annee_scolaire, classe_id])).rows[0];
+      'INSERT INTO eleves(nom,prenom,date_naissance,sexe,adresse,antecedents_medicaux,annee_entree,classe_id,email) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',
+      [p.eleve_nom, p.eleve_prenom, p.date_naissance, p.sexe, p.adresse, p.antecedents_medicaux, p.annee_scolaire, classe_id,
+        await genererEmailEleve({ nom: p.eleve_nom, prenom: p.eleve_prenom, date_naissance: p.date_naissance })])).rows[0];
     await cl.query('UPDATE eleves SET matricule=$1 WHERE id=$2', [`E${anneeDebut(p.annee_scolaire)}${pad(el.id, 4)}`, el.id]);
     await cl.query('INSERT INTO eleve_parents(eleve_id,parent_id) VALUES ($1,$2)', [el.id, parent.id]);
     await cl.query("UPDATE preinscriptions SET statut='validee', eleve_id=$1, traitee_par=$2 WHERE id=$3", [el.id, req.user.id, p.id]);

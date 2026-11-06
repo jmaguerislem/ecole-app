@@ -1,4 +1,4 @@
-// « Faire l'appel » : l'enseignant ouvre la liste des élèves d'une classe pour une date et marque les absents.
+// « Faire l'appel » (réservé aux enseignants, dans leurs classes uniquement) : l'enseignant ouvre la liste des élèves d'une classe pour une date et marque les absents.
 const express = require('express');
 const { q, tx } = require('../db');
 const { allow } = require('../auth');
@@ -14,21 +14,18 @@ async function loadClasse(user, classeId) {
   if (!Number.isInteger(id)) throw new HttpError(400, 'Classe invalide');
   const c = (await q('SELECT id, annee_scolaire FROM classes WHERE id=$1 AND deleted_at IS NULL', [id])).rows[0];
   if (!c) throw new HttpError(404, 'Classe introuvable');
-  if (user.role === 'enseignant') {
-    const params = [];
-    const p = (v) => { params.push(v); return '$' + params.length; };
-    const ok = await q(`SELECT 1 WHERE ${p(id)}::int IN (${TEACH_CLASSES(p, user.id)})`, params);
-    if (!ok.rowCount) throw new HttpError(403, "Cette classe n'est pas dans vos classes");
-  }
+  const params = [];
+  const p = (v) => { params.push(v); return '$' + params.length; };
+  const ok = await q(`SELECT 1 WHERE ${p(id)}::int IN (${TEACH_CLASSES(p, user.id)})`, params);
+  if (!ok.rowCount) throw new HttpError(403, "Cette classe n'est pas dans vos classes");
   return c;
 }
 
-// Classes sur lesquelles l'utilisateur peut faire l'appel (enseignant : les siennes ; admin : toutes)
-r.get('/classes', allow('admin', 'enseignant'), ah(async (req, res) => {
+// Classes sur lesquelles l'enseignant peut faire l'appel : les siennes
+r.get('/classes', allow('enseignant'), ah(async (req, res) => {
   const params = [req.query.annee || config.anneeCourante];
   const p = (v) => { params.push(v); return '$' + params.length; };
-  const where = ['c.deleted_at IS NULL', 'c.annee_scolaire=$1'];
-  if (req.user.role === 'enseignant') where.push(`c.id IN (${TEACH_CLASSES(p, req.user.id)})`);
+  const where = ['c.deleted_at IS NULL', 'c.annee_scolaire=$1', `c.id IN (${TEACH_CLASSES(p, req.user.id)})`];
   const { rows } = await q(
     `SELECT c.id, c.niveau||COALESCE(' '||c.section,'') AS nom,
             (SELECT COUNT(*) FROM eleves e WHERE e.classe_id=c.id AND e.deleted_at IS NULL AND e.statut='actif')::int AS effectif
@@ -37,7 +34,7 @@ r.get('/classes', allow('admin', 'enseignant'), ah(async (req, res) => {
 }));
 
 // Liste des élèves actifs de la classe + absence éventuelle à la date demandée
-r.get('/', allow('admin', 'enseignant'), ah(async (req, res) => {
+r.get('/', allow('enseignant'), ah(async (req, res) => {
   const classe = await loadClasse(req.user, req.query.classe_id);
   const date = A.checkDateAbsence(req.query.date || A.aujourdhui(), { user: req.user, annee: classe.annee_scolaire });
   const { rows } = await q(
@@ -49,7 +46,7 @@ r.get('/', allow('admin', 'enseignant'), ah(async (req, res) => {
 }));
 
 // Enregistrement de l'appel : `absents` = liste complète des élèves absents ce jour-là
-r.put('/', allow('admin', 'enseignant'), ah(async (req, res) => {
+r.put('/', allow('enseignant'), ah(async (req, res) => {
   const classe = await loadClasse(req.user, req.body.classe_id);
   const date = A.checkDateAbsence(req.body.date_absence, { user: req.user, annee: classe.annee_scolaire });
   if (!Array.isArray(req.body.absents)) throw new HttpError(400, 'Liste des absents invalide');
@@ -75,7 +72,7 @@ r.put('/', allow('admin', 'enseignant'), ah(async (req, res) => {
     for (const a of existantes) if (!parEleve.has(a.eleve_id)) parEleve.set(a.eleve_id, a);
 
     for (const [eleveId, a] of parEleve) {
-      const verrou = a.justifiee && req.user.role !== 'admin'; // absence justifiée par un parent : seul l'admin peut la changer
+      const verrou = a.justifiee; // absence justifiée : seule la direction peut la modifier (page Absences)
       const voulu = absents.get(eleveId);
       if (!voulu) {
         if (verrou) { bilan.conserves++; continue; }

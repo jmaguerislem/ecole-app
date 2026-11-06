@@ -45,15 +45,15 @@ async function creerEcole(label, nom, marker) {
   s.parentId = (await must(s.admin, 'POST', '/api/users', { nom: 'Parent', prenom: `Par ${marker}`, email: `par-${label}-${stamp}@test.tn`, role: 'parent', password: PW })).id;
   s.eleves = [];
   for (const [i, n] of ['Un', 'Deux', 'Trois'].entries()) {
-    const el = await must(s.admin, 'POST', '/api/eleves', { nom: marker, prenom: `${marker}${n}`, date_naissance: '2018-05-05', classe_id: s.classe, matricule: `MAT00${i + 1}`, statut: 'actif', parent_ids: i < 2 ? [s.parentId] : [] });
+    const el = await must(s.admin, 'POST', '/api/eleves', { password: PW, password_confirm: PW, nom: marker, prenom: `${marker}${n}`, date_naissance: '2018-05-05', classe_id: s.classe, matricule: `MAT00${i + 1}`, statut: 'actif', parent_ids: i < 2 ? [s.parentId] : [] });
     s.eleves.push(el.id);
   }
   s.affectation = (await must(s.admin, 'POST', '/api/affectations', { enseignant_id: s.ensId, matiere_id: s.matiere, classe_id: s.classe })).id;
-  s.tarif = (await must(s.admin, 'POST', '/api/tarifs', { libelle: `Scolarité ${marker}`, type: 'scolarite', montant: 300 })).id;
+  s.tarif = (await must(s.admin, 'POST', '/api/tarifs', { libelle: `Scolarité ${marker}`, type: 'scolarite', niveau: '1ère année', montant: 300 })).id;
   s.paiement = (await must(s.admin, 'POST', '/api/paiements', { eleve_id: s.eleves[0], tarif_id: s.tarif, montant: 100, mode: 'especes' })).id;
   s.evaluation = (await must(s.admin, 'POST', '/api/evaluations', { classe_id: s.classe, matiere_id: s.matiere, titre: `Contrôle ${marker}`, bareme: 20, date_eval: `${annee}-10-15` })).id;
   await must(s.admin, 'PUT', `/api/evaluations/${s.evaluation}/notes`, { notes: [{ eleve_id: s.eleves[0], valeur: 15 }] });
-  await must(s.admin, 'PUT', '/api/absences/appel', { classe_id: s.classe, date_absence: jourPasse(), absents: [{ eleve_id: s.eleves[1], periode: 'journee' }] });
+  await must(s.admin, 'POST', '/api/absences', { eleve_id: s.eleves[1], date_absence: jourPasse(), periode: 'journee' });
   s.absence = (await must(s.admin, 'GET', '/api/absences'))[0].id;
   s.annonce = (await must(s.admin, 'POST', '/api/annonces', { titre: `Annonce ${marker}`, corps: `Contenu réservé à ${marker}`, audience: 'tous' })).id;
   s.message = (await must(s.admin, 'POST', '/api/messages', { objet: `Message ${marker}`, corps: 'Bonjour', destinataires: JSON.stringify([s.parentId]), brouillon: 'false' })).id;
@@ -204,7 +204,7 @@ for (const [v, o] of sens) {
 test('matricule : même valeur autorisée dans deux écoles, interdite dans la même école', async () => {
   for (const l of ['A', 'B']) {
     assert.equal((await db.qa("SELECT COUNT(*) n FROM eleves WHERE matricule='MAT001' AND school_id=$1", [S[l].id])).rows[0].n, 1);
-    const r = await call(S[l].admin, 'POST', '/api/eleves', { nom: S[l].marker, prenom: 'Doublon', matricule: 'MAT001', statut: 'actif' });
+    const r = await call(S[l].admin, 'POST', '/api/eleves', { password: PW, password_confirm: PW, nom: S[l].marker, prenom: 'Doublon', matricule: 'MAT001', statut: 'actif' });
     assert.equal(r.status, 409);
   }
 });

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, fmtDateTime } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import { Alert, Field, Files, Modal, Pill } from '../components/ui.jsx';
+import Icon from '../components/Icon.jsx';
+import { Alert, Field, Files, Modal, PageHeader, Pill, Spinner } from '../components/ui.jsx';
 
 const STATUT = { a_faire: ['warn', 'À faire'], rendu: ['ok', 'Rendu'], en_retard: ['bad', 'Rendu en retard'], note: ['ok', 'Noté'], non_rendu: ['bad', 'Non rendu'] };
 const toLocal = (d) => { const x = new Date(d); return new Date(x.getTime() - x.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
@@ -29,7 +30,7 @@ function DevoirCard({ d, role, eleveId, reload }) {
         <input ref={input} aria-label="Fichiers du travail" type="file" multiple style={{ maxWidth: 320 }} onChange={(e) => setFiles([...e.target.files])} />
         <button className="btn sm" disabled={!files.length} onClick={deposer}>{d.depot_id ? 'Remplacer mon dépôt' : 'Déposer mon travail'}</button></div>}
       {role === 'parent' && !d.vu && <button className="btn sec sm" style={{ marginTop: '.5rem' }} onClick={async () => { await api(`/devoirs/${d.id}/vu`, { method: 'POST', body: { eleve_id: Number(eleveId) } }); reload(); }}>Marquer comme vu</button>}
-      {role === 'parent' && d.vu && <span className="muted small">✓ Vu</span>}
+      {role === 'parent' && d.vu && <span className="muted small"><Icon name="check" size={14} /> Vu</span>}
       <Alert>{err}</Alert><Alert kind="ok">{ok}</Alert>
     </article>
   );
@@ -41,7 +42,7 @@ function DevoirsFamille({ role }) {
   useEffect(() => { load(); }, [eid]);
   return (
     <div>
-      <h1>Devoirs</h1>
+      <PageHeader title="Devoirs" />
       {eleves.length > 1 && <div style={{ marginBottom: '1rem', maxWidth: 320 }}><label htmlFor="en">Enfant</label><select id="en" value={eid} onChange={(e) => setEid(e.target.value)}>{eleves.map((e) => <option key={e.id} value={e.id}>{e.prenom} {e.nom}</option>)}</select></div>}
       <Alert>{err}</Alert>
       {list?.length === 0 && <div className="card empty">Aucun devoir pour le moment.</div>}
@@ -98,7 +99,7 @@ function DevoirForm({ initial, onClose, onDone }) {
         <Field f={{ name: 'date_remise', label: 'Date de remise', type: 'datetime-local', required: true, ...(initial ? {} : { min: toLocal(new Date()) }), help: initial ? undefined : 'Doit être dans le futur.' }} value={v.date_remise} onChange={set('date_remise')} />
         <Field f={{ name: 'bareme', label: 'Barème (sur)', type: 'number', step: '0.5', min: 1, max: 100, required: true }} value={v.bareme} onChange={set('bareme')} />
         <div className="full"><label htmlFor="pj">Pièces jointes</label><input id="pj" type="file" multiple onChange={(e) => setFiles([...e.target.files])} />
-          {initial?.fichiers?.filter((f) => !remove.includes(f.name)).map((f) => <div key={f.name} className="small">📎 {f.original} <button type="button" className="btn danger sm" onClick={() => setRemove((r) => [...r, f.name])}>Retirer</button></div>)}</div>
+          {initial?.fichiers?.filter((f) => !remove.includes(f.name)).map((f) => <div key={f.name} className="small"><Icon name="paperclip" size={14} /> {f.original} <button type="button" className="btn danger sm" onClick={() => setRemove((r) => [...r, f.name])}>Retirer</button></div>)}</div>
       </div><Alert>{err}</Alert><div className="row" style={{ marginTop: '1rem' }}><button className="btn">Enregistrer</button><button type="button" className="btn sec" onClick={onClose}>Annuler</button></div></form>
     </Modal>
   );
@@ -120,7 +121,7 @@ function DevoirsStaff() {
   };
   return (
     <div>
-      <div className="row between"><h1>Devoirs</h1><button className="btn" onClick={() => setModal({ type: 'form' })}>+ Nouveau devoir</button></div>
+      <PageHeader title="Devoirs"><button type="button" className="btn" onClick={() => setModal({ type: 'form' })}><Icon name="plus" size={16} />Nouveau devoir</button></PageHeader>
       <Alert>{err}</Alert><Alert kind="ok">{msg}</Alert>
       <input ref={corr} type="file" hidden onChange={uploadCorr} />
       <div className="table-wrap"><table><thead><tr><th>Devoir</th><th>Classe</th><th>Matière</th><th>Remise</th><th>Dépôts</th><th>Actions</th></tr></thead><tbody>

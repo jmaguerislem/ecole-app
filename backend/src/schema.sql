@@ -310,3 +310,42 @@ CREATE TABLE IF NOT EXISTS access_log (
   ressource_id INT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ===== Évolutions : e-mail élève, annonces ciblées, historique des tarifs =====
+-- 1) E-mail de l'élève : généré par le serveur, unique dans toute la base (insensible à la casse)
+ALTER TABLE eleves ADD COLUMN IF NOT EXISTS email TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_eleves_email ON eleves (lower(email)) WHERE email IS NOT NULL;
+
+-- 2) Annonces : audience « personne » (destinataires choisis un par un)
+ALTER TABLE annonces ADD COLUMN IF NOT EXISTS destinataire_ids INT[];
+ALTER TABLE annonces DROP CONSTRAINT IF EXISTS annonces_audience_check;
+ALTER TABLE annonces ADD CONSTRAINT annonces_audience_check CHECK (audience IN ('tous','parents','enseignants','eleves','personne'));
+
+-- 3) Historique des tarifs : chaque création / modification / suppression / augmentation automatique est conservée
+CREATE TABLE IF NOT EXISTS tarifs_historique (
+  id SERIAL PRIMARY KEY,
+  tarif_id INT REFERENCES tarifs(id),
+  annee_scolaire TEXT NOT NULL,
+  niveau TEXT,
+  libelle TEXT NOT NULL,
+  type TEXT,
+  montant_ancien NUMERIC(10,2),
+  montant_nouveau NUMERIC(10,2),
+  motif TEXT NOT NULL CHECK (motif IN ('creation','modification','augmentation_auto','suppression')),
+  user_id INT REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_tarifs_hist_tarif ON tarifs_historique(tarif_id);
+CREATE INDEX IF NOT EXISTS idx_tarifs_hist_niveau ON tarifs_historique(niveau, annee_scolaire);
+
+-- 4) Informations administratives de l'école (renseignées à la création ; affichées dans la page Écoles)
+ALTER TABLE schools ADD COLUMN IF NOT EXISTS ville TEXT;
+ALTER TABLE schools ADD COLUMN IF NOT EXISTS adresse TEXT;
+ALTER TABLE schools ADD COLUMN IF NOT EXISTS telephone TEXT;
+ALTER TABLE schools ADD COLUMN IF NOT EXISTS email_contact TEXT;
+
+-- 5) Corrections de données appliquées UNE seule fois (évite de réécrire, à chaque démarrage, des valeurs modifiées depuis)
+CREATE TABLE IF NOT EXISTS data_migrations (
+  nom TEXT PRIMARY KEY,
+  applique_le TIMESTAMPTZ NOT NULL DEFAULT now()
+);

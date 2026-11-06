@@ -48,6 +48,14 @@ Chaque école est isolée des autres : un utilisateur ne voit et ne modifie que 
 - **Mise à jour d'une installation existante** : au premier démarrage, les données actuelles sont rattachées à la première école (nom = `ECOLE_NOM`), les fichiers sont rangés dans `uploads/<id-école>/`. **Faites une sauvegarde avant.** Les utilisateurs doivent se reconnecter une fois.
 - **Tests d'isolation** (deux écoles fictives, joués dans les deux sens) : `cd backend && DATABASE_URL=postgres://… npm test`. À relancer avant chaque mise à jour.
 
+### Liste des écoles, élèves et écoles « Abou Kacem Chebbi »
+- **Liste des écoles unique** : `GET /api/public/schools` (écoles ouvertes, publique) et `GET /api/saas/schools` (toutes, super-administrateur) partagent `backend/src/services/ecoles.js` ; côté interface, le composant `SchoolSelect` affiche partout le même libellé « Nom (Ville) » dans le même ordre (pré-inscription, page Écoles, en-tête). Deux écoles ne peuvent plus porter le même nom dans la même ville.
+- **Ajout d'un élève** : plus de champ « Compte de connexion » ; « Mot de passe » + « Confirmer le mot de passe » sont obligatoires. Le serveur crée le compte (rôle élève, identifiant = e-mail de l'élève, mot de passe haché bcrypt) et le lie à l'élève. À la modification, un mot de passe vide laisse le compte inchangé. Ces comptes ne comptent pas dans le quota « utilisateurs ».
+- **Écoles Abou Kacem Chebbi** : au prochain démarrage (migration, une seule fois), l'école de Nabeul devient « École Primaire Abou el Kacem Chebbi – Nabeul » (statut Actif) et les coordonnées manquantes des deux écoles sont complétées. Pour ajouter les données de démonstration cohérentes à l'école d'origine (Tozeur) : `cd backend && npm run ecoles:completer` (relançable sans doublon).
+
+### Statistiques globales (directeurs + super-administrateur)
+Page **Statistiques globales** (`/statistiques`, route `GET /api/stats/global`, `/api/stats/ecole/:id`) : totaux (écoles, directeurs, utilisateurs, élèves), écoles actives / suspendues / en essai, graphiques en anneau et en barres, une couleur par école, détail d'une école au choix. Les chiffres sont calculés en base à chaque appel pour **toutes** les écoles ; ce sont des compteurs uniquement (le super-administrateur voit en plus la liste des directeurs). Mise à jour automatique : après chaque modification faite dans l'application, toutes les 15 s, et au retour sur l'onglet. Tests : `backend/tests/stats.test.js`.
+
 ### Inscription libre-service, formules et quotas
 - **Inscription d'une école** : page publique `/inscription` (route `POST /api/public/signup`). L'école est créée en statut *essai*, formule *Basic*, pour 30 jours ; la direction se connecte aussitôt.
 - **Quotas par formule** (`backend/src/services/quotas.js`) : Basic 50 élèves / 20 utilisateurs, Standard 200 / 80, Premium illimité. Au-delà, l'API répond 402 avec un message explicite (création, import CSV compris). Modifiez `LIMITES` pour ajuster.
@@ -106,3 +114,14 @@ frontend/  React + Vite (src/pages, components, public/ = PWA)
 scripts/   backup.sh, restore.sh
 Dockerfile, docker-compose.yml, .env.example
 ```
+
+## Évolutions récentes
+- **Élèves** : classe (liste + « Ajouter une classe »), parents (liste + « Ajouter un parent »), photo (fichier ou caméra), e-mail généré automatiquement et unique (`prenom.nom@<école>.tn`, variantes en cas de doublon). Variable optionnelle : `ELEVE_EMAIL_DOMAINE`.
+- **Comptes** : e-mails lisibles (copie en un clic), confirmation du mot de passe dans tous les formulaires (jamais affiché ni renvoyé).
+- **Annonces** : destinataires = Personne personnalisée / Tous les élèves / Tous les enseignants / Tous les parents.
+- **Tarifs** : un prix par niveau et par année, +50 DT automatiques chaque nouvelle année (`TARIF_AUGMENTATION_ANNUELLE`), historique complet conservé (table `tarifs_historique`).
+- La migration (`npm run migrate` ou démarrage) est idempotente et renseigne l'e-mail des élèves existants.
+
+## 5 écoles de démonstration
+`npm run seed:ecoles` (Docker : `docker compose exec app node src/seed-ecoles.js`) crée 5 écoles complètes (direction, secrétariat, 6 enseignants, 18 parents, 30 élèves, classes, matières, emploi du temps, tarifs avec historique, paiements, notes, absences, annonces). Relançable sans risque (une école déjà présente est ignorée). La liste des comptes est dans `docs/COMPTES_DEMO.md` (mot de passe commun `Demo@2026!`).
+**« Faire l'appel »** est réservé aux enseignants (dans leurs classes) ; la direction saisit/consulte les absences depuis la page Absences.

@@ -5,6 +5,7 @@ const path = require('path');
 const { q, tx, qa, txa, runWith } = require('../db');
 const { slugify } = require('../migrate');
 const { sign, auth, allow, abonnementBloque } = require('../auth');
+const { libelleEcole } = require('../libelle-ecole');
 const { audit } = require('../audit');
 const { ah, HttpError } = require('../util');
 const config = require('../config');
@@ -15,12 +16,12 @@ const priv = express.Router(); // routes authentifiées
 
 // Configuration publique : le nom affiché est celui de l'école demandée (?ecole=slug), sinon le nom de la plateforme
 pub.get('/config', ah(async (req, res) => {
-  let nom = config.plateformeNom;
+  let nom = config.plateformeNom; let ville = null;
   if (req.query.ecole) {
-    const s = (await qa('SELECT nom FROM schools WHERE slug=$1', [String(req.query.ecole).slice(0, 60)])).rows[0];
-    if (s) nom = s.nom;
+    const s = (await qa('SELECT nom, ville FROM schools WHERE slug=$1', [String(req.query.ecole).slice(0, 60)])).rows[0];
+    if (s) { nom = s.nom; ville = s.ville; }
   }
-  res.json({ anneeCourante: config.anneeCourante, ecoleNom: nom, vapidPublicKey: config.vapid?.pub || null });
+  res.json({ anneeCourante: config.anneeCourante, ecoleNom: nom, ecoleVille: ville, ecoleLabel: libelleEcole({ nom, ville }), vapidPublicKey: config.vapid?.pub || null });
 }));
 
 // Inscription libre-service d'une école : essai de 30 jours, formule Basic. (limitée par le rate-limit de /api/public)
@@ -47,7 +48,7 @@ pub.post('/auth/login', ah(async (req, res) => {
   if (typeof email !== 'string' || typeof password !== 'string' || email.length > 120 || password.length > 128) throw new HttpError(400, 'E-mail ou mot de passe invalide');
   // La connexion n'a pas encore d'école : on retrouve le compte par son e-mail (unique dans toute la base)
   const { rows } = await qa(
-    `SELECT u.*, s.nom AS school_nom, s.slug AS school_slug, s.status AS school_status, s.subscription_end
+    `SELECT u.*, s.nom AS school_nom, s.slug AS school_slug, s.ville AS school_ville, s.status AS school_status, s.subscription_end
      FROM users u LEFT JOIN schools s ON s.id=u.school_id WHERE u.email=$1 AND u.deleted_at IS NULL`, [String(email).toLowerCase().trim()]);
   const u = rows[0];
   const ok = u && u.actif && (await bcrypt.compare(password, u.password_hash));
@@ -57,15 +58,16 @@ pub.post('/auth/login', ah(async (req, res) => {
     if (refus) throw new HttpError(403, refus);
     await runWith({ schoolId: u.school_id, schoolNom: u.school_nom }, () => audit(null, u, 'login', 'users', u.id, null, null));
   }
-  res.json({ token: sign(u), user: { id: u.id, email: u.email, role: u.role, nom: u.nom, prenom: u.prenom, school: u.school_id ? { id: u.school_id, nom: u.school_nom, slug: u.school_slug } : null } });
+  res.json({ token: sign(u), user: { id: u.id, email: u.email, role: u.role, nom: u.nom, prenom: u.prenom, school: u.school_id ? { id: u.school_id, nom: u.school_nom, slug: u.school_slug, ville: u.school_ville, label: libelleEcole({ nom: u.school_nom, ville: u.school_ville }) } : null } });
 }));
 
 priv.get('/auth/me', (req, res) => res.json({ ...req.user, school: req.school }));
 
 priv.post('/auth/change-password', ah(async (req, res) => {
-  const { ancien, nouveau } = req.body || {};
+  const { ancien, nouveau, confirmation } = req.body || {};
   if (typeof ancien !== 'string' || ancien.length > 128) throw new HttpError(400, 'Ancien mot de passe invalide');
   V.motDePasse(nouveau, 'Le nouveau mot de passe');
+  if (confirmation !== undefined && confirmation !== nouveau) throw new HttpError(400, 'La confirmation ne correspond pas au nouveau mot de passe');
   if (nouveau === ancien) throw new HttpError(400, "Le nouveau mot de passe doit être différent de l'ancien");
   const u = (await qa('SELECT password_hash FROM users WHERE id=$1', [req.user.id])).rows[0]; // propre compte (id issu de la session)
   if (!(await bcrypt.compare(ancien || '', u.password_hash))) throw new HttpError(400, 'Ancien mot de passe incorrect');

@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
 const { qa, runWith } = require('./db');
 const c = require('./config');
+// (libelleEcole est défini sans dépendance pour éviter un import circulaire avec services/ecoles.js)
+const { libelleEcole } = require('./libelle-ecole');
 
 // Le jeton contient l'école (`sch`) : elle est aussi revérifiée en base à chaque requête (jamais lue depuis la page).
 const sign = (u) => jwt.sign({ sub: u.id, role: u.role, sch: u.school_id ?? null }, c.jwtSecret, { expiresIn: c.jwtExpires });
@@ -22,7 +24,7 @@ async function auth(req, res, next) {
   try {
     const p = jwt.verify(token, c.jwtSecret);
     const { rows } = await qa(
-      `SELECT u.id,u.email,u.role,u.nom,u.prenom,u.actif,u.school_id, s.nom AS school_nom, s.slug AS school_slug, s.status AS school_status, s.subscription_end
+      `SELECT u.id,u.email,u.role,u.nom,u.prenom,u.actif,u.school_id, s.nom AS school_nom, s.slug AS school_slug, s.ville AS school_ville, s.status AS school_status, s.subscription_end
        FROM users u LEFT JOIN schools s ON s.id=u.school_id WHERE u.id=$1 AND u.deleted_at IS NULL`, [p.sub]);
     u = rows[0];
     if (!u || !u.actif) return res.status(401).json({ error: 'Compte inactif ou supprimé' });
@@ -34,9 +36,9 @@ async function auth(req, res, next) {
     const refus = abonnementBloque({ status: u.school_status, subscription_end: u.subscription_end });
     if (refus) return res.status(403).json({ error: refus });
   }
-  const { school_nom, school_slug, school_status, subscription_end, ...user } = u;
+  const { school_nom, school_slug, school_ville, school_status, subscription_end, ...user } = u;
   req.user = user;
-  req.school = u.school_id ? { id: u.school_id, nom: school_nom, slug: school_slug } : null;
+  req.school = u.school_id ? { id: u.school_id, nom: school_nom, slug: school_slug, ville: school_ville, label: libelleEcole({ nom: school_nom, ville: school_ville }) } : null;
   // Tout ce qui suit (filtres, créations) s'exécute dans le contexte de CETTE école. Le super-administrateur n'a aucune école :
   // il ne voit donc aucune donnée d'école (ses écrans utilisent des requêtes dédiées).
   req.tenant = { schoolId: u.school_id ?? null, schoolNom: school_nom || null };

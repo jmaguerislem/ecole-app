@@ -1,9 +1,10 @@
 import { useNavigate } from 'react-router-dom';
 import { useRef, useState } from 'react';
-import { api, download, fmtDate, money } from '../api.js';
+import { api, download, fmtDate, money, ROLES } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import CrudPage from '../components/CrudPage.jsx';
-import { Alert, Modal, Pill } from '../components/ui.jsx';
+import { Alert, EmailCell, Modal, Pill } from '../components/ui.jsx';
+import { ClassePicker, ParentPicker, PhotoField, EmailEleveField, AuthImage, PASSWORD_FIELDS, ELEVE_PASSWORD_FIELDS, verifierMotsDePasse } from '../components/EleveFields.jsx';
 
 // Règles de saisie partagées : âge minimum 6 ans, téléphone tunisien à 8 chiffres
 const AGE_MIN = 6;
@@ -24,7 +25,6 @@ const opt = {
   matiere: { url: '/matieres', label: (r) => r.nom },
   prof: { url: '/users?role=enseignant', label: (r) => r.nom_complet },
   parent: { url: '/users?role=parent', label: (r) => r.nom_complet },
-  eleveUser: { url: '/users?role=eleve', label: (r) => r.nom_complet },
   eleve: { url: '/eleves', label: (r) => `${r.nom} ${r.prenom}` },
   salle: { url: '/salles', label: (r) => r.nom },
   tarif: { url: '/tarifs', label: (r) => `${r.libelle} (${money(r.montant)})` },
@@ -57,18 +57,18 @@ export const Affectations = () => <CrudPage title="Affectations enseignant ↔ m
 const userFields = (extra = []) => [
   { name: 'nom', label: 'Nom', required: true, ...NOM }, { name: 'prenom', label: 'Prénom', required: true, ...NOM }, { name: 'email', label: 'E-mail (identifiant)', type: 'email', required: true, ...EMAIL },
   { name: 'telephone', label: 'Téléphone', ...TEL }, ...extra,
-  { name: 'password', label: 'Mot de passe', type: 'password', help: 'Laisser vide pour ne pas changer. 8 caractères minimum, avec une lettre et un chiffre.', ...MOT_DE_PASSE },
+  ...PASSWORD_FIELDS,
   { name: 'actif', label: 'Compte actif', type: 'checkbox', default: true },
 ];
-const userCols = [{ key: 'nom_complet', label: 'Nom' }, { key: 'email', label: 'E-mail' }, { key: 'telephone', label: 'Téléphone' }, { key: 'actif', label: 'Actif' }];
+const userCols = [{ key: 'nom_complet', label: 'Nom' }, { label: 'E-mail', render: (r) => <EmailCell email={r.email} /> }, { key: 'telephone', label: 'Téléphone' }, { label: 'Statut', render: (r) => <Pill kind={r.actif ? 'ok' : ''}>{r.actif ? 'Actif' : 'Inactif'}</Pill> }];
 export function Enseignants() {
-  return <CrudPage title="Enseignants" endpoint="/users" query={{ role: 'enseignant' }} columns={[...userCols, { key: 'specialite', label: 'Spécialité' }]} fields={userFields([{ name: 'specialite', label: 'Spécialité', maxLength: 80 }])} transformBody={(b) => ({ ...b, role: 'enseignant' })} />;
+  return <CrudPage title="Enseignants" endpoint="/users" query={{ role: 'enseignant' }} columns={[...userCols, { key: 'specialite', label: 'Spécialité' }]} fields={userFields([{ name: 'specialite', label: 'Spécialité', maxLength: 80 }])} transformBody={(b) => ({ ...b, role: 'enseignant' })} validate={verifierMotsDePasse} />;
 }
 export function Parents() {
   const { user } = useAuth();
-  return <CrudPage title="Parents" endpoint="/users" query={{ role: 'parent' }} canWrite={isAdmin(user)} columns={userCols} fields={userFields()} transformBody={(b) => ({ ...b, role: 'parent' })} />;
+  return <CrudPage title="Parents" endpoint="/users" query={{ role: 'parent' }} canWrite={isAdmin(user)} columns={userCols} fields={userFields()} transformBody={(b) => ({ ...b, role: 'parent' })} validate={verifierMotsDePasse} />;
 }
-export const Comptes = () => <CrudPage title="Tous les comptes" endpoint="/users" columns={[...userCols, { key: 'role', label: 'Rôle' }]}
+export const Comptes = () => <CrudPage title="Tous les comptes" endpoint="/users" columns={[...userCols, { label: 'Rôle', render: (r) => <Pill>{ROLES[r.role] || r.role}</Pill> }]} validate={verifierMotsDePasse} wideModal
   fields={userFields([{ name: 'role', label: 'Rôle', type: 'select', required: true, options: [['admin', 'Administrateur'], ['enseignant', 'Enseignant'], ['parent', 'Parent'], ['eleve', 'Élève'], ['comptable', 'Comptable / Secrétariat']].map(([value, label]) => ({ value, label })) }])} />;
 
 export function Eleves() {
@@ -90,15 +90,16 @@ export function Eleves() {
       <CrudPage title="Élèves" endpoint="/eleves" canWrite={write}
         hint={write ? "Colonnes d'import CSV : nom, prenom, date_naissance, sexe, adresse, annee_entree, classe (ex. « 1ère année A »), matricule." : null}
         toolbar={write && <><button className="btn sec" onClick={() => download('/eleves/export', 'eleves.csv')}>Exporter CSV</button><button className="btn sec" onClick={() => file.current.click()}>Importer CSV</button><input ref={file} type="file" accept=".csv,text/csv" hidden onChange={importCsv} /></>}
-        columns={[{ key: 'matricule', label: 'Matricule' }, { label: 'Élève', render: (r) => `${r.nom} ${r.prenom}` }, { key: 'classe_nom', label: 'Classe' }, { label: 'Naissance', render: (r) => fmtDate(r.date_naissance) }, { label: 'Statut', render: (r) => <Pill kind={r.statut === 'actif' ? 'ok' : ''}>{r.statut}</Pill> }]}
+        columns={[{ label: 'Photo', render: (r) => <AuthImage src={r.photo} alt={`Photo de ${r.prenom} ${r.nom}`} className="thumb" fallback={<span className="thumb ph" aria-hidden="true">{(r.prenom || '?')[0]}</span>} /> }, { key: 'matricule', label: 'Matricule' }, { label: 'Élève', render: (r) => `${r.nom} ${r.prenom}` }, { label: 'E-mail', render: (r) => <EmailCell email={r.email} /> }, { key: 'classe_nom', label: 'Classe' }, { label: 'Naissance', render: (r) => fmtDate(r.date_naissance) }, { label: 'Statut', render: (r) => <Pill kind={r.statut === 'actif' ? 'ok' : ''}>{r.statut}</Pill> }]}
         fields={[{ name: 'nom', label: 'Nom', required: true, ...NOM }, { name: 'prenom', label: 'Prénom', required: true, ...NOM }, { name: 'date_naissance', label: 'Date de naissance', type: 'date', ...NAISSANCE },
           { name: 'sexe', label: 'Sexe', type: 'select', options: [{ value: 'M', label: 'Garçon' }, { value: 'F', label: 'Fille' }] }, { name: 'matricule', label: 'Matricule', help: 'Généré automatiquement si vide', maxLength: 20, pattern: '[A-Za-z0-9\\-]+', title: 'Lettres, chiffres et tirets' },
-          { name: 'classe_id', label: 'Classe', type: 'select', optionsFrom: opt.classe }, { name: 'annee_entree', label: "Année d'entrée", ...ANNEE },
+          { name: 'email', label: 'E-mail', render: (p) => <EmailEleveField {...p} /> },
+          { name: 'classe_id', label: 'Classe', type: 'select', optionsFrom: { url: '/classes', label: (r) => `${r.nom} (${r.effectif}/${r.capacite})` }, render: (p) => <ClassePicker {...p} /> }, { name: 'annee_entree', label: "Année d'entrée", ...ANNEE },
           { name: 'statut', label: 'Statut', type: 'select', options: ['actif', 'inactif', 'diplome'].map((v) => ({ value: v, label: v })), required: true },
-          { name: 'parent_ids', label: 'Parents / tuteurs (Ctrl+clic pour plusieurs)', type: 'multiselect', optionsFrom: opt.parent, full: true },
-          { name: 'user_id', label: "Compte de connexion de l'élève", type: 'select', optionsFrom: opt.eleveUser },
-          { name: 'photo', label: 'Photo (URL)', type: 'url', maxLength: 500, placeholder: 'https://…' }, { name: 'adresse', label: 'Adresse', full: true, maxLength: 200 }, { name: 'antecedents_medicaux', label: 'Antécédents médicaux', type: 'textarea', full: true, maxLength: 1000 }]}
-        defaults={{ statut: 'actif' }}
+          { name: 'parent_ids', label: 'Parents / tuteurs', type: 'multiselect', optionsFrom: opt.parent, full: true, render: (p) => <ParentPicker {...p} /> },
+          ...ELEVE_PASSWORD_FIELDS,
+          { name: 'photo', label: 'Photo', full: true, render: (p) => <PhotoField {...p} /> }, { name: 'adresse', label: 'Adresse', full: true, maxLength: 200 }, { name: 'antecedents_medicaux', label: 'Antécédents médicaux', type: 'textarea', full: true, maxLength: 1000 }]}
+        defaults={{ statut: 'actif' }} wideModal validate={verifierMotsDePasse} transformBody={(b) => { const { email, ...rest } = b; return rest; }}
         rowActions={(r, reload, { setInfo, setError }) => <>
           <button className="btn sec sm" onClick={() => nav(`/bulletins?eleve=${r.id}`)}>Bulletin</button>
           {write && !r.classe_id && <button className="btn sec sm" onClick={async () => { try { const x = await api(`/eleves/${r.id}/auto-affectation`, { method: 'POST' }); setInfo(`Affecté automatiquement en ${x.niveau}.`); reload(); } catch (e) { setError(e.message); } }}>Affecter</button>}
@@ -126,8 +127,13 @@ function ValidateButton({ row, reload, setInfo, setError }) {
       <div className="row" style={{ marginTop: '1rem' }}><button className="btn" onClick={valider}>Valider</button><button className="btn sec" onClick={() => setOpen(false)}>Annuler</button></div></Modal>}
   </>;
 }
-export const Preinscriptions = () => <CrudPage title="Pré-inscriptions" endpoint="/preinscriptions" annee
-  hint="Lien public du formulaire à communiquer aux familles : /preinscription"
+export function Preinscriptions() {
+  const { user } = useAuth();
+  const lien = `${window.location.origin}/preinscription${user.school?.slug ? `/${user.school.slug}` : ''}`;
+  return <PreinscriptionsTable hint={`Lien du formulaire de votre école à communiquer aux familles : ${lien}`} />;
+}
+const PreinscriptionsTable = ({ hint }) => <CrudPage title="Pré-inscriptions" endpoint="/preinscriptions" annee
+  hint={hint}
   columns={[{ label: 'Enfant', render: (r) => `${r.eleve_nom} ${r.eleve_prenom}` }, { label: 'Naissance', render: (r) => fmtDate(r.date_naissance) }, { key: 'niveau_souhaite', label: 'Niveau' }, { label: 'Parent', render: (r) => `${r.parent_nom} ${r.parent_prenom} – ${r.parent_email}` },
     { label: 'Statut', render: (r) => <Pill kind={r.statut === 'validee' ? 'ok' : r.statut === 'refusee' ? 'bad' : 'warn'}>{r.statut.replace('_', ' ')}</Pill> }]}
   fields={[{ name: 'eleve_nom', label: "Nom de l'enfant", required: true, ...NOM }, { name: 'eleve_prenom', label: "Prénom de l'enfant", required: true, ...NOM }, { name: 'date_naissance', label: 'Naissance', type: 'date', required: true, ...NAISSANCE },
@@ -135,11 +141,7 @@ export const Preinscriptions = () => <CrudPage title="Pré-inscriptions" endpoin
     { name: 'parent_email', label: 'E-mail du parent', type: 'email', required: true, ...EMAIL }, { name: 'parent_telephone', label: 'Téléphone', ...TEL }]}
   rowActions={(r, reload, h) => <ValidateButton row={r} reload={reload} {...h} />} canEditRow={(r) => r.statut === 'en_attente'} />;
 
-export const Tarifs = () => <CrudPage title="Grille tarifaire" endpoint="/tarifs" annee
-  columns={[{ key: 'libelle', label: 'Libellé' }, { key: 'type', label: 'Type' }, { key: 'niveau', label: 'Niveau' }, { label: 'Montant', render: (r) => money(r.montant) }, { label: 'Échéance', render: (r) => fmtDate(r.echeance) }]}
-  fields={[{ name: 'libelle', label: 'Libellé', required: true, ...LIBELLE(100) }, { name: 'type', label: 'Type', type: 'select', required: true, options: ['inscription', 'scolarite', 'tranche', 'autre'].map((v) => ({ value: v, label: v })) },
-    { name: 'niveau', label: 'Niveau (vide = tous)', type: 'select', options: NIVEAUX }, { name: 'montant', label: 'Montant (TND)', type: 'number', step: '0.01', min: 0.01, max: 100000, required: true }, { name: 'echeance', label: 'Échéance', type: 'date', help: "Doit être dans l'année scolaire (1er sept. → 31 août)." }, { name: 'annee_scolaire', label: 'Année scolaire', ...ANNEE }]}
-  defaults={{ type: 'scolarite' }} />;
+export { default as Tarifs } from './Tarifs.jsx';
 
 export function Evaluations() {
   const nav = useNavigate();

@@ -59,17 +59,17 @@ test('inscription : deux écoles de même nom reçoivent des identifiants distin
 
 test('quota élèves : formule Basic limitée à 50, levée en changeant de formule', async () => {
   await db.qa("INSERT INTO eleves(school_id,nom,prenom) SELECT $1,'Quota','E'||g FROM generate_series(1,50) g", [schoolId]);
-  const refus = await call(admin, 'POST', '/api/eleves', { nom: 'Trop', prenom: 'Plein', date_naissance: '2018-05-05', statut: 'actif' });
+  const refus = await call(admin, 'POST', '/api/eleves', { password: PW, password_confirm: PW, nom: 'Trop', prenom: 'Plein', date_naissance: '2018-05-05', statut: 'actif' });
   assert.equal(refus.status, 402, JSON.stringify(refus.data));
   assert.match(refus.data.error, /Limite de votre formule/);
   await db.qa("UPDATE schools SET plan='standard' WHERE id=$1", [schoolId]);
-  const ok = await call(admin, 'POST', '/api/eleves', { nom: 'Passe', prenom: 'Bien', date_naissance: '2018-05-05', statut: 'actif' });
+  const ok = await call(admin, 'POST', '/api/eleves', { password: PW, password_confirm: PW, nom: 'Passe', prenom: 'Bien', date_naissance: '2018-05-05', statut: 'actif' });
   assert.equal(ok.status, 201, JSON.stringify(ok.data));
 });
 
 test('quota utilisateurs : formule Basic limitée à 20 comptes', async () => {
   await db.qa("UPDATE schools SET plan='basic' WHERE id=$1", [schoolId]);
-  const n = Number((await db.qa('SELECT COUNT(*) n FROM users WHERE school_id=$1 AND deleted_at IS NULL', [schoolId])).rows[0].n);
+  const n = Number((await db.qa('SELECT COUNT(*) n FROM users WHERE school_id=$1 AND deleted_at IS NULL AND role<>\'eleve\'', [schoolId])).rows[0].n);
   await db.qa("INSERT INTO users(email,password_hash,role,nom,prenom,school_id) SELECT 'q'||g||'-'||$2||'@quota.test','x','parent','Quota','P'||g,$1 FROM generate_series(1,$3::int) g", [schoolId, stamp, 20 - n]);
   const refus = await call(admin, 'POST', '/api/users', { nom: 'Trop', prenom: 'Plein', email: `trop-${stamp}@quota.test`, role: 'parent', password: PW });
   assert.equal(refus.status, 402, JSON.stringify(refus.data));

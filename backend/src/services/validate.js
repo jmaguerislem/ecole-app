@@ -5,7 +5,7 @@ const { normDate, aujourdhui } = require('./absences');
 const bad = (m) => { throw new HttpError(400, m); };
 const NIVEAUX = ['1ère année', '2ème année', '3ème année', '4ème année', '5ème année', '6ème année'];
 const NOM_RE = /^\p{L}[\p{L}\p{M} '’.-]*$/u;
-const LIBELLE_RE = /^[\p{L}\p{N}][\p{L}\p{N}\p{M} '’.,&()/+-]*$/u;
+const LIBELLE_RE = /^[\p{L}\p{N}][\p{L}\p{N}\p{M} '’.,&()/+–—-]*$/u;
 const vide = (v) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
 
 // Texte : trim, longueur min/max, format optionnel. `multiligne` conserve les retours à la ligne.
@@ -68,6 +68,13 @@ function url(v, label) {
   try { if (!['http:', 'https:'].includes(new URL(t).protocol)) throw new Error(); } catch { bad(`${label} : adresse web invalide (http:// ou https://)`); }
   return t;
 }
+// Photo d'élève : adresse web http(s) ou fichier envoyé sur le serveur (/api/files/<hex>.jpg|png|webp)
+function photo(v, label = 'La photo') {
+  const t = texte(v, label, { max: 500 });
+  if (!t) return null;
+  if (/^\/api\/files\/[a-f0-9]{32}\.(jpg|png|webp)$/.test(t)) return t;
+  return url(t, label);
+}
 function heure(v, label) {
   const t = String(v ?? '').slice(0, 5);
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) bad(`${label} : heure invalide`);
@@ -101,4 +108,4 @@ function preinscription(b, { complet = true } = {}) {
   return o;
 }
 
-module.exports = { NIVEAUX, aujourdhui, texte, nomPropre, libelle, nombre, date, bornesAnnee, annee, choix, email, url, heure, motDePasse, entiersId, preinscription };
+module.exports = { NIVEAUX, aujourdhui, texte, nomPropre, libelle, nombre, date, bornesAnnee, annee, choix, email, url, photo, heure, motDePasse, entiersId, preinscription };

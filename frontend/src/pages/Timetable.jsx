@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
+import { PageHeader, Spinner } from '../components/ui.jsx';
 import CrudPage from '../components/CrudPage.jsx';
 import { opt } from './Entities.jsx';
 
@@ -18,7 +19,7 @@ export default function Timetable() {
   const days = jour ? [jour] : [1, 2, 3, 4, 5, 6];
   return (
     <div>
-      <h1>Emploi du temps</h1>
+      <PageHeader title="Emploi du temps" />
       {canWrite && <div className="tabs" role="tablist">
         <button role="tab" aria-selected={tab === 'semaine'} onClick={() => setTab('semaine')}>Vue calendrier</button>
         <button role="tab" aria-selected={tab === 'gerer'} onClick={() => setTab('gerer')}>Gérer les créneaux</button></div>}
@@ -27,11 +28,11 @@ export default function Timetable() {
           {classes.length > 1 && <div><label htmlFor="c">Classe</label><select id="c" value={classe} onChange={(e) => setClasse(e.target.value)}><option value="">Toutes</option>{classes.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}</select></div>}
           <div><label htmlFor="j">Affichage</label><select id="j" value={jour} onChange={(e) => setJour(Number(e.target.value))}><option value={0}>Semaine</option>{JOURS.map((j, i) => <option key={j} value={i + 1}>{j}</option>)}</select></div>
         </div>
-        {rows === null ? <p>Chargement…</p> : <div className="week" style={{ gridTemplateColumns: `repeat(${days.length}, minmax(150px,1fr))` }}>
+        {rows === null ? <Spinner /> : <div className="week" style={{ gridTemplateColumns: `repeat(${days.length}, minmax(150px,1fr))` }}>
           {days.map((d) => (
             <div key={d} className="day"><h3>{JOURS[d - 1]}</h3>
               {rows.filter((r) => r.jour === d).map((r) => (
-                <div key={r.id} className="slot"><b>{hm(r.heure_debut)}–{hm(r.heure_fin)}</b><br />{r.matiere_nom}<br /><span className="muted">{r.classe_nom} · {r.enseignant_nom}{r.salle_nom ? ` · ${r.salle_nom}` : ''}</span></div>))}
+                <div key={r.id} className="slot"><span className="slot-time">{hm(r.heure_debut)}–{hm(r.heure_fin)}</span><span className="slot-title">{r.matiere_nom}</span><span className="muted">{r.classe_nom} · {r.enseignant_nom}{r.salle_nom ? ` · ${r.salle_nom}` : ''}</span></div>))}
               {rows.filter((r) => r.jour === d).length === 0 && <div className="muted small">Aucun cours</div>}
             </div>))}
         </div>}

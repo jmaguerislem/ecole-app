@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
-import { Alert, Field, Modal } from './ui.jsx';
+import Icon from './Icon.jsx';
+import { Alert, EmptyState, Field, Modal, PageHeader, SkeletonRows } from './ui.jsx';
 
 // Page CRUD générique : liste + recherche + Ajouter / Modifier / Supprimer (avec confirmation des suppressions contrôlées)
-export default function CrudPage({ title, endpoint, columns, fields, canWrite = true, query = {}, defaults = {}, annee = false, rowActions, toolbar, searchable = true, transformBody, hint, canEditRow, canDeleteRow }) {
+export default function CrudPage({ title, endpoint, columns, fields, canWrite = true, query = {}, defaults = {}, annee = false, rowActions, toolbar, searchable = true, transformBody, hint, canEditRow, canDeleteRow, validate, onChange, above, wideModal }) {
   const { config } = useAuth();
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
@@ -26,14 +27,15 @@ export default function CrudPage({ title, endpoint, columns, fields, canWrite = 
   }, [endpoint, qs, search, annee, year]);
   useEffect(() => { const t = setTimeout(load, search ? 250 : 0); return () => clearTimeout(t); }, [load, search]);
 
-  useEffect(() => {
-    fields.filter((f) => f.optionsFrom).forEach(async (f) => {
+  const loadOpts = useCallback(async (only) => {
+    await Promise.all(fields.filter((f) => f.optionsFrom && (!only || f.name === only)).map(async (f) => {
       try {
         const data = await api(f.optionsFrom.url);
-        setOpts((o) => ({ ...o, [f.name]: data.map((r) => ({ value: r[f.optionsFrom.value || 'id'], label: f.optionsFrom.label(r) })) }));
+        setOpts((o) => ({ ...o, [f.name]: data.map((r) => ({ value: r[f.optionsFrom.value || 'id'], label: f.optionsFrom.label(r), raw: r })) }));
       } catch { /* option indisponible pour ce rôle */ }
-    });
+    }));
   }, [fields]);
+  useEffect(() => { loadOpts(); }, [loadOpts]);
 
   const open = (row) => {
     const v = {};
@@ -43,60 +45,71 @@ export default function CrudPage({ title, endpoint, columns, fields, canWrite = 
   const save = async (e) => {
     e.preventDefault(); setSaving(true); setFormError('');
     try {
+      const verr = validate?.(form, modal.row);
+      if (verr) { setFormError(verr); setSaving(false); return; }
       let body = { ...form };
+      fields.forEach((f) => { if (f.type === 'password' && f.confirmOf && !f.sendConfirm) delete body[f.name]; }); // confirmation vérifiée ici, et renvoyée au serveur seulement si le champ le demande (sendConfirm)
       if (modal.row) fields.forEach((f) => { if (f.type === 'password' && !body[f.name]) delete body[f.name]; });
       if (transformBody) body = transformBody(body, modal.row);
       await api(modal.row ? `${endpoint}/${modal.row.id}` : endpoint, { method: modal.row ? 'PUT' : 'POST', body });
-      setModal(null); setInfo(modal.row ? 'Modification enregistrée.' : 'Élément ajouté.'); load();
+      setModal(null); setInfo(modal.row ? 'Modification enregistrée.' : 'Élément ajouté.'); load(); onChange?.();
     } catch (err) { setFormError(err.message); } finally { setSaving(false); }
   };
   const remove = async (row) => {
     if (!window.confirm('Supprimer cet élément ?')) return;
-    try { await api(`${endpoint}/${row.id}`, { method: 'DELETE' }); setInfo('Élément supprimé.'); load(); }
+    try { await api(`${endpoint}/${row.id}`, { method: 'DELETE' }); setInfo('Élément supprimé.'); load(); onChange?.(); }
     catch (e) {
       if (e.data?.confirmable && window.confirm(e.message)) {
-        try { await api(`${endpoint}/${row.id}?force=true`, { method: 'DELETE' }); setInfo('Élément supprimé.'); load(); } catch (e2) { setError(e2.message); }
+        try { await api(`${endpoint}/${row.id}?force=true`, { method: 'DELETE' }); setInfo('Élément supprimé.'); load(); onChange?.(); } catch (e2) { setError(e2.message); }
       } else setError(e.message);
     }
   };
   const cell = (r, c) => (c.render ? c.render(r) : typeof r[c.key] === 'boolean' ? (r[c.key] ? 'Oui' : 'Non') : r[c.key] ?? '—');
+  const nCols = columns.length + 1;
 
   return (
     <div>
-      <div className="row between"><h1>{title}</h1>
-        <div className="row">{toolbar}{canWrite && <button className="btn" onClick={() => open(null)}>+ Ajouter</button>}</div></div>
-      {hint && <p className="muted">{hint}</p>}
-      <div className="row" style={{ margin: '.5rem 0' }}>
-        {searchable && <input aria-label="Rechercher" placeholder="Rechercher…" maxLength={100} value={search} onChange={(e) => setSearch(e.target.value)} style={{ maxWidth: 280 }} />}
-        {annee && <input aria-label="Année scolaire" value={year} maxLength={9} pattern="(\d{4}-\d{4}|all)" title="Format 2026-2027, ou « all » pour toutes les années" onChange={(e) => setYear(e.target.value.trim())} placeholder="2026-2027 ou all" style={{ maxWidth: 160 }} />}
-      </div>
+      <PageHeader title={title} subtitle={hint}>
+        {toolbar}{canWrite && <button type="button" className="btn" onClick={() => open(null)}><Icon name="plus" size={16} />Ajouter</button>}
+      </PageHeader>
+      {(searchable || annee) && (
+        <div className="filters">
+          {searchable && <div className="search"><Icon name="search" size={18} /><input type="search" aria-label="Rechercher" placeholder="Rechercher…" maxLength={100} value={search} onChange={(e) => setSearch(e.target.value)} /></div>}
+          {annee && <div className="year"><input aria-label="Année scolaire" value={year} maxLength={9} pattern="(\d{4}-\d{4}|all)" title="Format 2026-2027, ou « all » pour toutes les années" onChange={(e) => setYear(e.target.value.trim())} placeholder="2026-2027 ou all" /></div>}
+        </div>
+      )}
       <Alert>{error}</Alert><Alert kind="ok">{info}</Alert>
-      <div className="table-wrap">
-        <table>
-          <thead><tr>{columns.map((c) => <th key={c.label}>{c.label}</th>)}<th>Actions</th></tr></thead>
+      {above}
+      <div className="table-wrap stack">
+        <table role="table">
+          <thead><tr role="row">{columns.map((c) => <th key={c.label} role="columnheader" scope="col">{c.label}</th>)}<th role="columnheader" scope="col">Actions</th></tr></thead>
           <tbody>
-            {rows === null && <tr><td colSpan={columns.length + 1} className="empty">Chargement…</td></tr>}
-            {rows?.length === 0 && <tr><td colSpan={columns.length + 1} className="empty">Aucun élément. {canWrite && 'Utilisez « Ajouter » pour commencer.'}</td></tr>}
+            {rows === null && <SkeletonRows cols={nCols} />}
+            {rows?.length === 0 && <tr role="row" className="empty-row"><td role="cell" colSpan={nCols}><EmptyState title="Aucun élément">{canWrite ? 'Utilisez « Ajouter » pour commencer.' : 'Rien à afficher pour le moment.'}</EmptyState></td></tr>}
             {rows?.map((r) => (
-              <tr key={r.id}>
-                {columns.map((c) => <td key={c.label}>{cell(r, c)}</td>)}
-                <td><div className="row">
+              <tr key={r.id} role="row">
+                {columns.map((c) => <td key={c.label} role="cell" data-label={c.label}>{cell(r, c)}</td>)}
+                <td role="cell" className="actions-cell" data-label="Actions"><div className="row">
                   {rowActions?.(r, load, { setInfo, setError })}
-                  {canWrite && (canEditRow ? canEditRow(r) : true) && <button className="btn sec sm" onClick={() => open(r)}>Modifier</button>}
-                  {canWrite && (canDeleteRow ? canDeleteRow(r) : true) && <button className="btn danger sm" onClick={() => remove(r)}>Supprimer</button>}
+                  {canWrite && (canEditRow ? canEditRow(r) : true) && <button type="button" className="btn sec sm" onClick={() => open(r)}><Icon name="pencil" size={14} />Modifier</button>}
+                  {canWrite && (canDeleteRow ? canDeleteRow(r) : true) && <button type="button" className="btn danger sm" onClick={() => remove(r)}><Icon name="trash" size={14} />Supprimer</button>}
                 </div></td>
               </tr>))}
           </tbody>
         </table>
       </div>
       {modal && (
-        <Modal title={modal.row ? `Modifier – ${title}` : `Ajouter – ${title}`} onClose={() => setModal(null)}>
+        <Modal title={modal.row ? `Modifier – ${title}` : `Ajouter – ${title}`} onClose={() => setModal(null)} wide={wideModal}>
           <form onSubmit={save}>
             <div className="form-grid">
-              {fields.map((f) => <Field key={f.name} f={f} value={form[f.name]} options={f.options || opts[f.name]} onChange={(v) => setForm((s) => ({ ...s, [f.name]: v }))} />)}
+              {fields.map((f0) => {
+                const f = f0.requiredOnCreate ? { ...f0, required: !modal.row } : f0;
+                return <Field key={f.name} f={f} value={form[f.name]} options={f.options || opts[f.name]} onChange={(v) => setForm((s) => ({ ...s, [f.name]: v }))}
+                  form={form} patch={(p) => setForm((s) => ({ ...s, ...p }))} editing={modal.row} reloadOptions={() => loadOpts(f.name)} />;
+              })}
             </div>
             <Alert>{formError}</Alert>
-            <div className="row" style={{ marginTop: '1rem' }}><button className="btn" disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button><button type="button" className="btn sec" onClick={() => setModal(null)}>Annuler</button></div>
+            <div className="modal-actions"><button className="btn" disabled={saving}>{saving ? <><span className="spinner" aria-hidden="true" />Enregistrement…</> : 'Enregistrer'}</button><button type="button" className="btn sec" onClick={() => setModal(null)}>Annuler</button></div>
           </form>
         </Modal>)}
     </div>

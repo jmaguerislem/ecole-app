@@ -16,6 +16,7 @@ export async function api(path, { method = 'GET', body, form } = {}) {
     if (res.status === 401 && t) { setToken(null); window.location.href = '/login'; }
     throw Object.assign(new Error(data?.error || `Erreur ${res.status}`), { status: res.status, data });
   }
+  if (method !== 'GET') window.dispatchEvent(new Event('data:changed')); // les statistiques affichées se rafraîchissent après chaque modification
   return data;
 }
 // Téléchargement/ouverture d'un fichier protégé (JWT dans l'en-tête)
