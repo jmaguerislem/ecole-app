@@ -96,6 +96,14 @@ priv.post('/push/subscribe', ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// Déconnexion d'un appareil mobile : on retire son jeton pour qu'il ne reçoive plus les notifications de ce compte
+priv.post('/push/unsubscribe', ah(async (req, res) => {
+  const { endpoint } = req.body || {};
+  if (!endpoint) throw new HttpError(400, 'Abonnement invalide');
+  await q('DELETE FROM push_subscriptions WHERE endpoint=$1 AND user_id=$2', [endpoint, req.user.id]);
+  res.json({ ok: true });
+}));
+
 // --- Fichiers (accès authentifié) ---
 // Les fichiers sont rangés par école (uploads/<school_id>/…) : on ne sert que le dossier de l'école de l'utilisateur
 priv.get('/files/:name', (req, res) => {

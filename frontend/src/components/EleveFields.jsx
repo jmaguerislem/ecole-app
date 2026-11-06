@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, getToken } from '../api.js';
+import { apiUrl } from '../platform.js';
 import { useAuth } from '../auth.jsx';
 import Icon from './Icon.jsx';
 import { Alert, PasswordInput } from './ui.jsx';
@@ -19,7 +20,7 @@ export function AuthImage({ src, alt = '', className, fallback = null }) {
     if (!src.startsWith('/api/')) { setUrl(src); return undefined; }
     if (cache.has(src)) { setUrl(cache.get(src)); return undefined; }
     let alive = true;
-    fetch(src, { headers: { Authorization: `Bearer ${getToken()}` } })
+    fetch(apiUrl(src), { headers: { Authorization: `Bearer ${getToken()}` } })
       .then((r) => (r.ok ? r.blob() : Promise.reject()))
       .then((b) => { const u = URL.createObjectURL(b); cache.set(src, u); if (alive) setUrl(u); })
       .catch(() => alive && setFail(true));

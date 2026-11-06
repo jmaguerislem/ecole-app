@@ -350,3 +350,10 @@ fieldset.fs{border:0;margin:0 0 1.5rem;padding:0;min-width:0} fieldset.fs legend
 .plain{margin:0;padding-left:1.1rem}
 
 .back-link.linklike{background:none;border:0;padding:0;font:inherit;color:var(--accent);cursor:pointer} .back-link.linklike:hover{color:var(--accent-hover);text-decoration:underline}
+
+/* ===== Application native (Capacitor) : zones de sécurité (encoche, barre d'état) et confort tactile ===== */
+html.native{-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;overscroll-behavior:none}
+html.native body{-webkit-user-select:none;user-select:none}
+html.native input,html.native textarea,html.native [contenteditable]{-webkit-user-select:text;user-select:text}
+html.native .top{padding-top:calc(.5rem + env(safe-area-inset-top));padding-left:calc(1rem + env(safe-area-inset-left));padding-right:calc(1rem + env(safe-area-inset-right))}
+html.native .side{padding-top:env(safe-area-inset-top)}

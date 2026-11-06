@@ -4,3 +4,4 @@ dist/
 backend/uploads/*
 !backend/uploads/.gitkeep
 backups/
+*.dump

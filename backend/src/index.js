@@ -24,7 +24,9 @@ const { listerEcoles } = require('./services/ecoles');
 const app = express();
 app.set('trust proxy', 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' }, contentSecurityPolicy: false }));
-app.use(cors(config.corsOrigin ? { origin: config.corsOrigin.split(','), credentials: true } : {}));
+// L'application mobile (Capacitor) appelle l'API depuis ces origines : Android https://localhost, iOS capacitor://localhost
+const NATIVE_ORIGINS = ['https://localhost', 'capacitor://localhost', 'ionic://localhost'];
+app.use(cors(config.corsOrigin ? { origin: [...config.corsOrigin.split(',').map((o) => o.trim()), ...NATIVE_ORIGINS], credentials: true } : {}));
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));

@@ -3,6 +3,8 @@ import { api, download } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { Alert } from '../components/ui.jsx';
 import { MOT_DE_PASSE } from '../rules.js';
+import { isNative } from '../platform.js';
+import { registerPush } from '../push.js';
 
 const b64 = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
 export default function Compte() {
@@ -16,6 +18,7 @@ export default function Compte() {
   };
   const push = async () => {
     try {
+      if (isNative) { await registerPush(); setMsg({ k: 'ok', t: 'Notifications push activées sur cet appareil.' }); return; }
       if (!config.vapidPublicKey) throw new Error("Les notifications push ne sont pas configurées sur ce serveur.");
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error("Ce navigateur ne prend pas en charge les notifications push.");
       if ((await Notification.requestPermission()) !== 'granted') throw new Error('Autorisation refusée.');

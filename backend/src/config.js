@@ -27,6 +27,8 @@ module.exports = {
     ? { host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 587), user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
     : null,
   mailFrom: process.env.MAIL_FROM || 'ecole@example.com',
+  // Notifications push de l'application mobile (Firebase Cloud Messaging) : JSON du compte de service Firebase, en une ligne
+  firebase: process.env.FIREBASE_SERVICE_ACCOUNT ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT) : null,
   vapid: process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY
     ? { pub: process.env.VAPID_PUBLIC_KEY, priv: process.env.VAPID_PRIVATE_KEY, subject: process.env.VAPID_SUBJECT || 'mailto:ecole@example.com' }
     : null,

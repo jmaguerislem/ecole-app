@@ -1,0 +1,11 @@
+{
+  "appId": "tn.ecole.app",
+  "appName": "École",
+  "webDir": "dist",
+  "server": { "androidScheme": "https" },
+  "plugins": {
+    "SplashScreen": { "launchShowDuration": 800, "backgroundColor": "#1B2F5B", "showSpinner": false },
+    "StatusBar": { "style": "DARK", "backgroundColor": "#1B2F5B", "overlaysWebView": false },
+    "PushNotifications": { "presentationOptions": ["badge", "sound", "alert"] }
+  }
+}
