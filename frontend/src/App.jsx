@@ -21,6 +21,7 @@ import Compte from './pages/Compte.jsx';
 import Appel from './pages/Appel.jsx';
 import Ecoles from './pages/Ecoles.jsx';
 import StatsGlobales from './pages/StatsGlobales.jsx';
+import StatsEcole from './pages/StatsEcole.jsx';
 
 // Menu par rôle (RBAC côté interface – le serveur applique de toute façon les droits).
 // Les entrées sont regroupées par domaine pour réduire la charge de lecture d'un menu de 22 liens.
@@ -28,7 +29,8 @@ const TOUS = ['admin', 'comptable', 'enseignant', 'parent', 'eleve'];
 const NAV = [
   { title: 'Pilotage', items: [
     ['/', 'Tableau de bord', 'dashboard', TOUS],
-    ['/statistiques', 'Statistiques globales', 'dashboard', ['admin', 'superadmin']],
+    ['/statistiques', 'Statistiques globales', 'dashboard', ['superadmin']], // toutes les écoles : super-administrateur
+    ['/statistiques', "Statistiques de l'école", 'dashboard', ['admin']], // le directeur ne voit que SON école
     ['/ecoles', 'Écoles', 'building', ['superadmin']],
   ] },
   { title: 'Scolarité', items: [
@@ -172,7 +174,7 @@ export default function App() {
       <Route path="/preinscription" element={<Preinscription />} />
       <Route path="/preinscription/:slug" element={<Preinscription />} />
       <Route path="/" element={user?.role === 'superadmin' ? <Navigate to="/statistiques" replace /> : guard(<Dashboard />)} />
-      <Route path="/statistiques" element={guardRoles(['admin', 'superadmin'], <StatsGlobales />)} />
+      <Route path="/statistiques" element={guardRoles(['admin', 'superadmin'], user?.role === 'superadmin' ? <StatsGlobales /> : <StatsEcole />)} />
       <Route path="/ecoles" element={guard(<Ecoles />)} />
       <Route path="/eleves" element={guard(<P.Eleves />)} />
       <Route path="/preinscriptions" element={guard(<P.Preinscriptions />)} />

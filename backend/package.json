@@ -12,7 +12,8 @@
     "seed:ecoles": "node src/seed-ecoles.js",
     "ecoles:completer": "node src/scripts/completer-ecoles.js",
     "superadmin": "node src/scripts/create-superadmin.js",
-    "test": "node --test --test-concurrency=1 tests/*.test.js"
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
+    "ecoles:verifier": "node src/scripts/verifier-coherence-ecoles.js"
   },
   "engines": {
     "node": ">=18"

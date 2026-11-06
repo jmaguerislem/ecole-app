@@ -1,4 +1,5 @@
-// Tests : statistiques globales (toutes les écoles) – calculées en base, droits par rôle, mise à jour immédiate.
+// Tests : statistiques globales du super-administrateur (toutes les écoles) – calculées en base, droits par rôle, mise à jour immédiate.
+// (Les statistiques d'une école pour son directeur sont testées dans stats-ecole.test.js.)
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
@@ -57,15 +58,14 @@ test('statistiques globales : totaux identiques aux données réelles de la base
   assert.equal(g.ecoles.reduce((t, x) => t + x.utilisateurs, 0) + g.totaux.superadmins, g.totaux.utilisateurs);
 });
 
-test('un directeur voit les statistiques de TOUTES les écoles (compteurs seulement), pas uniquement la sienne', async () => {
-  const g = (await call(E.A.token, 'GET', '/api/stats/global')).data;
-  assert.equal(g.vue, 'admin');
-  assert.ok(g.ecoles.some((x) => x.id === E.B.id) && g.ecoles.some((x) => x.id === E.C.id), 'les autres écoles sont présentes');
-  assert.equal(g.ecoles.find((x) => x.id === E.B.id).eleves, 2);
-  assert.deepEqual(g.ecoles.filter((x) => x.mon_ecole).map((x) => x.id), [E.A.id], 'seule son école est marquée « mon_ecole »');
-  const txt = JSON.stringify(g);
-  assert.ok(!txt.includes('@st.test') && g.ecoles.every((x) => x.liste_directeurs === undefined), "aucun e-mail ni nom de directeur d'une autre école");
-  assert.equal(g.totaux.ecoles, (await call(sup, 'GET', '/api/stats/global')).data.totaux.ecoles);
+test("un directeur ne voit PAS les statistiques globales : /global lui est refusé, et son école seule est accessible", async () => {
+  assert.equal((await call(E.A.token, 'GET', '/api/stats/global')).status, 403);
+  const mine = await call(E.A.token, 'GET', '/api/stats/mon-ecole');
+  assert.equal(mine.status, 200); assert.equal(mine.data.ecole.id, E.A.id);
+  assert.deepEqual([mine.data.utilisateurs.directeurs, mine.data.utilisateurs.enseignants, mine.data.utilisateurs.parents, mine.data.utilisateurs.total, mine.data.eleves.total], [1, 1, 1, 3, 0]);
+  const txt = JSON.stringify(mine.data);
+  assert.ok(!txt.includes(`Stats B ${stamp}`) && !txt.includes(`Stats C ${stamp}`) && !txt.includes('@st.test'), "aucune trace des autres écoles ni de leurs e-mails");
+  assert.equal((await call(E.A.token, 'GET', `/api/stats/ecole/${E.B.id}`)).status, 404, "une autre école est introuvable pour un directeur");
 });
 
 test('droits : refusé sans connexion et aux enseignants, parents, comptables, élèves', async () => {
@@ -77,9 +77,9 @@ test('droits : refusé sans connexion et aux enseignants, parents, comptables, �
 });
 
 test('détail d’une école séparément, et mise à jour immédiate après une modification', async () => {
-  const d = await call(E.A.token, 'GET', `/api/stats/ecole/${E.B.id}`);
+  const d = await call(sup, 'GET', `/api/stats/ecole/${E.B.id}`);
   assert.equal(d.status, 200); assert.equal(d.data.ecole.id, E.B.id); assert.equal(d.data.ecole.eleves, 2);
-  assert.equal((await call(E.A.token, 'GET', '/api/stats/ecole/999999')).status, 404);
+  assert.equal((await call(sup, 'GET', '/api/stats/ecole/999999')).status, 404);
   await call(E.B.token, 'POST', '/api/eleves', { nom: 'Bravo', prenom: 'Sami', date_naissance: '2018-05-05', password: PW, password_confirm: PW });
   assert.equal((await call(sup, 'GET', `/api/stats/ecole/${E.B.id}`)).data.ecole.eleves, 3, 'nouvel élève compté aussitôt');
   await call(sup, 'PUT', `/api/saas/schools/${E.C.id}`, { status: 'active' });

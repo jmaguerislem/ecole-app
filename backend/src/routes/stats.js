@@ -1,12 +1,15 @@
-// Statistiques GLOBALES de la plateforme (toutes les écoles), pour les directeurs d'école et le super-administrateur.
-// Calculées en base, à chaque appel, avec le pool « propriétaire » (qa) : elles ne se limitent donc pas à l'école du compte connecté.
-// Confidentialité : uniquement des COMPTEURS par école (aucun élève, parent, montant ni e-mail). Les noms/e-mails des directeurs
-// des autres écoles ne sont fournis qu'au super-administrateur. Chaque école est signalée « mon_ecole » pour le directeur connecté.
+// Statistiques.
+//  - SUPER-ADMINISTRATEUR : statistiques globales de la plateforme (toutes les écoles) – GET /global et GET /ecole/:id.
+//    Calculées en base, à chaque appel, avec le pool « propriétaire » (qa). Compteurs uniquement (aucun élève, parent ni montant).
+//  - DIRECTEUR : uniquement SA propre école – GET /mon-ecole (détail complet : élèves, enseignants, parents, utilisateurs, classes,
+//    absences, présences, paiements…). L'école vient du compte connecté, jamais de l'adresse. Un directeur ne reçoit AUCUNE donnée
+//    des autres écoles : /global lui est refusé et /ecole/:id n'accepte que l'identifiant de son école (sinon « introuvable »).
 const express = require('express');
 const { qa } = require('../db');
 const { allow } = require('../auth');
 const { ah, HttpError } = require('../util');
 const { listerEcoles } = require('../services/ecoles');
+const { statsEcole } = require('../services/stats-ecole');
 
 const r = express.Router();
 r.use(allow('admin', 'superadmin'));
@@ -60,9 +63,19 @@ async function calculer(user) {
   };
 }
 
-r.get('/global', ah(async (req, res) => { res.set('Cache-Control', 'no-store'); res.json(await calculer(req.user)); }));
+// Statistiques de l'école du directeur connecté (les seules auxquelles il a droit)
+r.get('/mon-ecole', allow('admin'), ah(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!req.user.school_id) throw new HttpError(403, "Aucune école n'est rattachée à ce compte");
+  res.json(await statsEcole(req.user.school_id));
+}));
+r.get('/global', allow('superadmin'), ah(async (req, res) => { res.set('Cache-Control', 'no-store'); res.json(await calculer(req.user)); }));
 r.get('/ecole/:id(\\d+)', ah(async (req, res) => {
   res.set('Cache-Control', 'no-store');
+  if (req.user.role === 'admin') { // directeur : seulement son école ; toute autre école est « introuvable » (on ne révèle même pas son existence)
+    if (Number(req.params.id) !== Number(req.user.school_id)) throw new HttpError(404, 'École introuvable');
+    return res.json({ vue: 'admin', ...(await statsEcole(req.user.school_id)) });
+  }
   const g = await calculer(req.user);
   const e = g.ecoles.find((x) => x.id === Number(req.params.id));
   if (!e) throw new HttpError(404, 'École introuvable');
