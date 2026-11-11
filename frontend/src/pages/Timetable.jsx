@@ -13,9 +13,17 @@ export default function Timetable() {
   const canWrite = ['admin', 'enseignant'].includes(user.role);
   const [tab, setTab] = useState('semaine');
   const [rows, setRows] = useState(null); const [classe, setClasse] = useState(''); const [classes, setClasses] = useState([]);
+  const [prof, setProf] = useState(''); const [profs, setProfs] = useState([]); // liste des enseignants (admin / comptable)
+  const voitProfs = ['admin', 'comptable'].includes(user.role);
   const [jour, setJour] = useState(0); // vue jour (mobile) : 0 = semaine
   useEffect(() => { api('/classes').then(setClasses).catch(() => {}); }, []);
-  useEffect(() => { api(`/creneaux${classe ? `?classe_id=${classe}` : ''}`).then(setRows).catch(() => setRows([])); }, [classe, tab]);
+  useEffect(() => { if (voitProfs) api('/users?role=enseignant').then(setProfs).catch(() => {}); }, [voitProfs]);
+  useEffect(() => {
+    const qs = new URLSearchParams();
+    if (classe) qs.set('classe_id', classe);
+    if (prof) qs.set('enseignant_id', prof);
+    api(`/creneaux${qs.toString() ? `?${qs}` : ''}`).then(setRows).catch(() => setRows([]));
+  }, [classe, prof, tab]);
   const days = jour ? [jour] : [1, 2, 3, 4, 5, 6];
   return (
     <div>
@@ -25,7 +33,8 @@ export default function Timetable() {
         <button role="tab" aria-selected={tab === 'gerer'} onClick={() => setTab('gerer')}>Gérer les créneaux</button></div>}
       {tab === 'semaine' && <>
         <div className="row" style={{ marginBottom: '1rem' }}>
-          {classes.length > 1 && <div><label htmlFor="c">Classe</label><select id="c" value={classe} onChange={(e) => setClasse(e.target.value)}><option value="">Toutes</option>{classes.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}</select></div>}
+          {(classes.length > 1 || voitProfs) && <div><label htmlFor="c">Classe</label><select id="c" value={classe} onChange={(e) => setClasse(e.target.value)}><option value="">Toutes les classes</option>{classes.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}</select></div>}
+          {voitProfs && <div><label htmlFor="p">Enseignant</label><select id="p" value={prof} onChange={(e) => setProf(e.target.value)}><option value="">Tous les enseignants</option>{profs.map((t) => <option key={t.id} value={t.id}>{t.nom_complet || `${t.nom} ${t.prenom}`}</option>)}</select></div>}
           <div><label htmlFor="j">Affichage</label><select id="j" value={jour} onChange={(e) => setJour(Number(e.target.value))}><option value={0}>Semaine</option>{JOURS.map((j, i) => <option key={j} value={i + 1}>{j}</option>)}</select></div>
         </div>
         {rows === null ? <Spinner /> : <div className="week" style={{ gridTemplateColumns: `repeat(${days.length}, minmax(150px,1fr))` }}>

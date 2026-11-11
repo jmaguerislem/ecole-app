@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
-import { Donut, StackedBars } from '../components/Charts.jsx';
+import { Donut } from '../components/Charts.jsx';
 import Icon from '../components/Icon.jsx';
-import { Alert, PageHeader, Pill, Spinner } from '../components/ui.jsx';
+import { Alert, PageHeader, Spinner } from '../components/ui.jsx';
 import { useLive } from '../useLive.js';
 
 const ROLES = { admin: ['Administrateurs', '#1B2F5B'], comptable: ['Comptables', '#7C3AED'], enseignant: ['Enseignants', '#0891B2'], parent: ['Parents', '#D97706'], eleve: ['Élèves', '#16A34A'] };
@@ -17,8 +17,6 @@ export default function SaAccueil() {
   if (err && !d) return <Alert>{err}</Alert>;
   if (!d) return <Spinner />;
   const T = d.totaux;
-  const cats = Object.entries(ROLES).map(([key, [label, color]]) => ({ key, label, color }));
-  const rows = d.ecoles.map((e) => ({ key: e.id, label: e.nom.replace(/^École Primaire /, ''), values: e.par_role }));
   return (
     <div>
       <PageHeader title="Accueil" subtitle="Vue d'ensemble de la plateforme, calculée en direct à partir de la base de données.">
@@ -38,23 +36,8 @@ export default function SaAccueil() {
       <div className="grid charts">
         <div className="card"><Donut title="Utilisateurs par rôle" center={fmt(T.utilisateurs)} data={d.roles.map((r) => ({ label: r.label, color: ROLES[r.role][1], value: r.n }))} /></div>
         <div className="card"><Donut title="Écoles actives et inactives" center={fmt(T.ecoles)} data={[{ label: 'Actives', color: '#16A34A', value: T.ecoles_actives }, { label: 'Inactives', color: '#DC2626', value: T.ecoles_inactives }]} /></div>
-        <div className="card wide2"><StackedBars title="Utilisateurs par rôle et par école" cats={cats} rows={rows} /></div>
       </div>
 
-      <h2 className="section-title">Détail par école</h2>
-      <div className="table-wrap stack"><table>
-        <thead><tr><th>École</th><th>Statut</th>{cats.map((c) => <th key={c.key}>{c.label}</th>)}<th>Total</th></tr></thead>
-        <tbody>
-          {d.ecoles.length === 0 && <tr><td colSpan={3 + cats.length} className="empty">Aucune école.</td></tr>}
-          {d.ecoles.map((e) => (
-            <tr key={e.id}>
-              <td data-label="École"><b>{e.nom}</b><div className="muted small">{e.ville || '—'}</div></td>
-              <td data-label="Statut"><Pill kind={e.ouverte ? (e.status === 'trial' ? 'warn' : 'ok') : 'bad'}>{e.status === 'suspended' ? 'Suspendue' : !e.ouverte ? 'Expirée' : e.status === 'trial' ? 'Essai' : 'Active'}</Pill></td>
-              {cats.map((c) => <td key={c.key} data-label={c.label}>{fmt(e.par_role[c.key])}</td>)}
-              <td data-label="Total"><b>{fmt(e.utilisateurs)}</b></td>
-            </tr>))}
-        </tbody>
-      </table></div>
       <p className="muted small" style={{ marginTop: '1rem' }}>« Active » : abonnement en cours (statut Actif ou Essai) ; « inactive » : école suspendue ou abonnement expiré. <Link to="/ecoles">Gérer les écoles</Link></p>
     </div>
   );
