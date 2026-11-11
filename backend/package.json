@@ -10,6 +10,7 @@
     "migrate": "node src/migrate.js",
     "seed": "node src/seed.js",
     "seed:ecoles": "node src/seed-ecoles.js",
+    "seed:demo": "node src/seed-demo.js",
     "ecoles:completer": "node src/scripts/completer-ecoles.js",
     "superadmin": "node src/scripts/create-superadmin.js",
     "test": "node --test --test-concurrency=1 tests/*.test.js",

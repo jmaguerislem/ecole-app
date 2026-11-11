@@ -1,0 +1,27 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "École – Pixel 7 (backend local)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "args": ["--dart-define=API_URL=http://10.0.2.2:4000"]
+    },
+    {
+      "name": "École – serveur en ligne (modifier l'URL)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "args": ["--dart-define=API_URL=https://VOTRE-SERVEUR.onrender.com"]
+    },
+    {
+      "name": "École – release (serveur en ligne)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "flutterMode": "release",
+      "args": ["--dart-define=API_URL=https://VOTRE-SERVEUR.onrender.com"]
+    }
+  ]
+}

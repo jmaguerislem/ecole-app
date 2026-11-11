@@ -20,7 +20,11 @@ import Journaux from './pages/Journaux.jsx';
 import Compte from './pages/Compte.jsx';
 import Appel from './pages/Appel.jsx';
 import Ecoles from './pages/Ecoles.jsx';
-import StatsGlobales from './pages/StatsGlobales.jsx';
+import SaAccueil from './pages/SaAccueil.jsx';
+import StatsFinancieres from './pages/StatsFinancieres.jsx';
+import ProfilSuperAdmin from './pages/ProfilSuperAdmin.jsx';
+import ChangerMotDePasse from './pages/ChangerMotDePasse.jsx';
+import SuperLayout from './components/SuperLayout.jsx';
 import StatsEcole from './pages/StatsEcole.jsx';
 
 // Menu par rôle (RBAC côté interface – le serveur applique de toute façon les droits).
@@ -29,9 +33,7 @@ const TOUS = ['admin', 'comptable', 'enseignant', 'parent', 'eleve'];
 const NAV = [
   { title: 'Pilotage', items: [
     ['/', 'Tableau de bord', 'dashboard', TOUS],
-    ['/statistiques', 'Statistiques globales', 'dashboard', ['superadmin']], // toutes les écoles : super-administrateur
     ['/statistiques', "Statistiques de l'école", 'dashboard', ['admin']], // le directeur ne voit que SON école
-    ['/ecoles', 'Écoles', 'building', ['superadmin']],
   ] },
   { title: 'Scolarité', items: [
     ['/eleves', 'Élèves', 'graduation', ['admin', 'comptable', 'enseignant']],
@@ -164,6 +166,22 @@ function RecuDownload() {
 export default function App() {
   const { user, ready } = useAuth();
   if (!ready) return <div style={{ padding: '3rem 1.5rem' }}><Spinner /></div>;
+  // Mot de passe temporaire (ex. parent créé automatiquement) : changement obligatoire avant tout le reste
+  if (user?.must_change_password) return <ChangerMotDePasse />;
+  // Super-administrateur : trois pages (menu déroulant) + Mon profil
+  if (user?.role === 'superadmin') {
+    return (
+      <SuperLayout>
+        <Routes>
+          <Route path="/" element={<SaAccueil />} />
+          <Route path="/ecoles" element={<Ecoles />} />
+          <Route path="/finances" element={<StatsFinancieres />} />
+          <Route path="/profil" element={<ProfilSuperAdmin />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </SuperLayout>
+    );
+  }
   const guard = (el) => (user ? <Layout>{el}</Layout> : <Navigate to="/login" replace />);
   // Page réservée à certains rôles : les autres sont renvoyés à l'accueil (le serveur refuse aussi l'accès)
   const guardRoles = (roles, el) => (user && !roles.includes(user.role) ? <Navigate to="/" replace /> : guard(el));
@@ -173,9 +191,8 @@ export default function App() {
       <Route path="/inscription" element={user ? <Navigate to="/" replace /> : <Inscription />} />
       <Route path="/preinscription" element={<Preinscription />} />
       <Route path="/preinscription/:slug" element={<Preinscription />} />
-      <Route path="/" element={user?.role === 'superadmin' ? <Navigate to="/statistiques" replace /> : guard(<Dashboard />)} />
-      <Route path="/statistiques" element={guardRoles(['admin', 'superadmin'], user?.role === 'superadmin' ? <StatsGlobales /> : <StatsEcole />)} />
-      <Route path="/ecoles" element={guard(<Ecoles />)} />
+      <Route path="/" element={guard(<Dashboard />)} />
+      <Route path="/statistiques" element={guardRoles(['admin'], <StatsEcole />)} />
       <Route path="/eleves" element={guard(<P.Eleves />)} />
       <Route path="/preinscriptions" element={guard(<P.Preinscriptions />)} />
       <Route path="/classes" element={guard(<P.Classes />)} />

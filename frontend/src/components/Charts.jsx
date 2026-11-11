@@ -48,3 +48,59 @@ export function Bars({ data, title, unit = '' }) {
     </figure>
   );
 }
+
+// Colonnes groupées (une série par couleur) : ex. loyer prévu et loyer encaissé, mois par mois.
+// `data` = [{ label, a, b, active }], `series` = [{ key: 'a', label, color }, …]. Chaque valeur est aussi écrite dans une table lisible par les lecteurs d'écran.
+export function Columns({ data, series, title, unit = '' }) {
+  const max = Math.max(1, ...data.flatMap((d) => series.map((s) => d[s.key] || 0)));
+  const W = 640; const H = 230; const L = 46; const B = 28; const T = 10; const gw = (W - L) / Math.max(1, data.length);
+  const bw = Math.min(18, (gw - 8) / series.length);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => Math.round(max * t));
+  return (
+    <figure className="chart">
+      <figcaption>{title}</figcaption>
+      <ul className="legend inline">{series.map((s) => <li key={s.key}><span className="dot" style={{ background: s.color }} aria-hidden="true" /><span>{s.label}</span></li>)}</ul>
+      <div className="cols-wrap">
+        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${title} : ${data.map((d) => `${d.label} ${series.map((s) => `${s.label} ${fmt(d[s.key])}`).join(', ')}`).join(' ; ')}`}>
+          {ticks.map((t) => { const y = T + (H - B - T) * (1 - t / max); return <g key={t}><line x1={L} x2={W} y1={y} y2={y} stroke="var(--line)" /><text x={L - 6} y={y + 4} textAnchor="end" className="axis">{fmt(t)}</text></g>; })}
+          {data.map((d, i) => {
+            const x0 = L + i * gw + (gw - bw * series.length) / 2;
+            return (
+              <g key={d.label} opacity={d.active === false ? 0.35 : 1}>
+                {series.map((s, k) => { const h = ((d[s.key] || 0) / max) * (H - B - T); return <rect key={s.key} x={x0 + k * bw} y={H - B - h} width={bw - 2} height={h} rx="2" fill={s.color}><title>{`${d.label} – ${s.label} : ${fmt(d[s.key])}${unit}`}</title></rect>; })}
+                <text x={L + i * gw + gw / 2} y={H - 9} textAnchor="middle" className="axis">{d.label}</text>
+              </g>);
+          })}
+        </svg>
+      </div>
+      <table className="sr-only"><caption>{title}</caption><thead><tr><th>Période</th>{series.map((s) => <th key={s.key}>{s.label}</th>)}</tr></thead>
+        <tbody>{data.map((d) => <tr key={d.label}><th>{d.label}</th>{series.map((s) => <td key={s.key}>{fmt(d[s.key])}{unit}</td>)}</tr>)}</tbody></table>
+    </figure>
+  );
+}
+
+// Barres horizontales EMPILÉES : une ligne par élément (école), un segment par catégorie (rôle).
+// `rows` = [{ key, label, values: { [catKey]: n } }], `cats` = [{ key, label, color }]
+export function StackedBars({ rows, cats, title }) {
+  const max = Math.max(1, ...rows.map((r) => cats.reduce((t, c) => t + (r.values[c.key] || 0), 0)));
+  return (
+    <figure className="chart">
+      <figcaption>{title}</figcaption>
+      <ul className="legend inline">{cats.map((c) => <li key={c.key}><span className="dot" style={{ background: c.color }} aria-hidden="true" /><span>{c.label}</span></li>)}</ul>
+      <ul className="stacked" aria-label={title}>
+        {rows.map((r) => {
+          const total = cats.reduce((t, c) => t + (r.values[c.key] || 0), 0);
+          return (
+            <li key={r.key}>
+              <span className="bar-label" title={r.label}>{r.label}</span>
+              <span className="stack-track" style={{ width: `${(total / max) * 100}%` }} role="img" aria-label={`${r.label} : ${cats.map((c) => `${c.label} ${r.values[c.key] || 0}`).join(', ')}`}>
+                {cats.map((c) => (r.values[c.key] ? <span key={c.key} className="stack-seg" style={{ flexGrow: r.values[c.key], background: c.color }} title={`${c.label} : ${fmt(r.values[c.key])}`} /> : null))}
+              </span>
+              <b className="bar-val">{fmt(total)}</b>
+            </li>);
+        })}
+        {rows.length === 0 && <li className="muted">Aucune donnée</li>}
+      </ul>
+    </figure>
+  );
+}

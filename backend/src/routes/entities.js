@@ -8,6 +8,7 @@ const A = require('../services/absences');
 const V = require('../services/validate');
 const { verifierQuota } = require('../services/quotas');
 const { genererEmailEleve } = require('../services/emailEleve');
+const { trouverOuCreerParent, inviterParent } = require('../services/invitations');
 const { assurerTarifsAnnee, historiser } = require('../services/tarifs');
 const { photoExiste, removeFile, imageUpload, imageValide } = require('../services/storage');
 const express = require('express');
@@ -25,7 +26,7 @@ const users = crud({
   table: 'users', read: ['admin', 'comptable'], write: ['admin'],
   fields: ['email', 'nom', 'prenom', 'role', 'telephone', 'specialite', 'actif'],
   required: ['email', 'nom', 'prenom', 'role'], filters: ['role'], searchFields: ['t.nom', 't.prenom', 't.email'],
-  columns: `t.id,t.email,t.role,t.nom,t.prenom,t.telephone,t.specialite,t.actif,t.created_at,t.nom||' '||t.prenom AS nom_complet`,
+  columns: `t.id,t.email,t.role,t.nom,t.prenom,t.telephone,t.specialite,t.actif,t.created_at,t.nom||' '||t.prenom AS nom_complet,t.invitation_envoyee_at,t.invitation_erreur,t.mot_de_passe_defini,t.must_change_password`,
   order: 't.nom, t.prenom',
   scope: (u) => (u.role === 'comptable' ? "t.role='parent'" : null),
   async beforeSave({ data, body, isNew, old, user, client }) {
@@ -57,6 +58,18 @@ const users = crud({
   ],
   beforeDelete({ user, old }) { if (user.id === old.id) throw new HttpError(400, 'Vous ne pouvez pas supprimer votre propre compte'); },
 });
+
+// Renvoyer l'invitation (e-mail en échec, mot de passe temporaire perdu…) : NOUVEAU mot de passe temporaire, ancien invalidé.
+// Refusé si le parent a déjà activé son compte (il a choisi son mot de passe : ce renvoi le verrouillerait dehors).
+const usersExtra = express.Router();
+usersExtra.post('/:id(\\d+)/renvoyer-invitation', allow('admin'), ah(async (req, res) => {
+  const u = (await q("SELECT id, role, must_change_password, mot_de_passe_defini FROM users WHERE id=$1 AND deleted_at IS NULL AND actif", [req.params.id])).rows[0];
+  if (!u || u.role !== 'parent') throw new HttpError(404, 'Compte parent introuvable');
+  if (!u.must_change_password && u.mot_de_passe_defini) throw new HttpError(409, "Ce parent a déjà activé son compte et choisi son mot de passe : il peut utiliser « Mot de passe oublié ».");
+  const r = await inviterParent({ userId: u.id, ecole: req.school?.label || req.school?.nom || 'École', renvoi: true });
+  await audit(null, req.user, 'resend_invitation', 'users', u.id, null, { ok: r.ok });
+  res.json({ email_envoye: r.ok, erreur: r.ok ? null : r.error });
+}));
 
 // ---------- Classes ----------
 const classes = crud({
@@ -184,7 +197,7 @@ const eleves = crud({
   columns: `t.*, ${CLASSE_NOM('c')} AS classe_nom, (SELECT COALESCE(array_agg(ep.parent_id),'{}'::int[]) FROM eleve_parents ep WHERE ep.eleve_id=t.id) AS parent_ids`,
   order: 't.nom, t.prenom',
   scope: (u, p) => eleveScope(p, u, 't.id'),
-  async beforeSave({ data, merged, client, old, body, isNew, user }) {
+  async beforeSave({ data, merged, client, old, body, isNew, user, req }) {
     if (isNew) await verifierQuota(user.school_id, 'eleves');
     const secret = controlerMotDePasseEleve(body, { isNew });
     if (data.nom !== undefined) data.nom = V.nomPropre(data.nom, "Le nom de l'élève");
@@ -207,6 +220,16 @@ const eleves = crud({
       body.parent_ids = ids;
       if (ids.length && (await client.query("SELECT COUNT(*) n FROM users WHERE id = ANY($1::int[]) AND role='parent' AND deleted_at IS NULL", [ids])).rows[0].n < ids.length) throw new HttpError(400, 'Un des parents sélectionnés est invalide');
     }
+    // Parent saisi avec l'élève : compte créé automatiquement (ou compte existant réutilisé, sans doublon) et lié à l'élève
+    if (body.parent !== undefined && body.parent !== null) {
+      if (typeof body.parent !== 'object' || Array.isArray(body.parent)) throw new HttpError(400, 'Parent invalide');
+      const base = body.parent_ids !== undefined ? body.parent_ids : (old ? (await client.query('SELECT parent_id FROM eleve_parents WHERE eleve_id=$1', [old.id])).rows.map((r) => r.parent_id) : []);
+      const p = await trouverOuCreerParent(client, body.parent, { schoolId: user.school_id });
+      const ids = [...new Set([...base.map(Number), p.id])];
+      if (ids.length > 4) throw new HttpError(400, 'Les parents : 4 éléments maximum');
+      body.parent_ids = ids;
+      if (p.cree || !base.map(Number).includes(p.id)) req.invitationParent = { userId: p.id, cree: p.cree, tempPassword: p.motDePasseTemporaire || null };
+    }
     if (data.date_naissance) checkNaissance(data.date_naissance);
     if (data.classe_id && (!old || String(old.classe_id) !== String(data.classe_id))) {
       const c = (await client.query('SELECT capacite, (SELECT COUNT(*) FROM eleves e WHERE e.classe_id=c.id AND e.deleted_at IS NULL AND e.id<>$2) AS n FROM classes c WHERE c.id=$1 AND c.deleted_at IS NULL', [data.classe_id, old ? old.id : 0])).rows[0];
@@ -225,6 +248,13 @@ const eleves = crud({
   },
   async afterCommit({ row, old }) {
     if (old?.photo && old.photo !== row.photo && old.photo.startsWith('/api/files/')) await removeFile(old.photo.slice(11));
+  },
+  // E-mail au parent après validation de la transaction (un échec d'envoi n'annule jamais l'inscription : l'état est renvoyé pour « Renvoyer »)
+  async afterCommitSync({ req, row }) {
+    const inv = req.invitationParent;
+    if (!inv) return null;
+    const r = await inviterParent({ userId: inv.userId, ecole: req.school?.label || req.school?.nom || 'École', tempPassword: inv.tempPassword });
+    return { invitation: { parent_id: inv.userId, compte_cree: inv.cree, email_envoye: r.ok, erreur: r.ok ? null : r.error } };
   },
   async afterSave({ client, row, body, isNew }) {
     if (isNew && !row.matricule) {
@@ -353,4 +383,4 @@ const absences = crud({
   },
 });
 
-module.exports = { tarifsExtra, elevesPhoto, users, classes, matieres, salles, affectations, eleves, tarifs, evaluations, absences };
+module.exports = { usersExtra, tarifsExtra, elevesPhoto, users, classes, matieres, salles, affectations, eleves, tarifs, evaluations, absences };

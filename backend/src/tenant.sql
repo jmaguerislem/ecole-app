@@ -88,3 +88,7 @@ GRANT USAGE ON SCHEMA public TO ecole_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ecole_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ecole_app;
 REVOKE INSERT, UPDATE, DELETE ON schools FROM ecole_app;
+
+-- 9) Données du propriétaire de la plateforme : le rôle applicatif (comptes d'école) n'y a AUCUN accès, même en lecture
+REVOKE ALL ON school_contracts, loyer_echeances, loyer_encaissements, password_setup_tokens FROM ecole_app;
+REVOKE ALL ON SEQUENCE loyer_echeances_id_seq, loyer_encaissements_id_seq, password_setup_tokens_id_seq FROM ecole_app;

@@ -22,6 +22,8 @@ module.exports = {
   plateformeNom: process.env.PLATEFORME_NOM || 'Gestion scolaire',
   appUrl: process.env.APP_URL || 'http://localhost:5173',
   corsOrigin: process.env.CORS_ORIGIN || '',
+  // Comptes de démonstration de la page de connexion (connexion SANS mot de passe) : activés par défaut hors production, à n'activer en production (DEMO_LOGIN=true) que pour une présentation.
+  demoLogin: process.env.DEMO_LOGIN ? process.env.DEMO_LOGIN === 'true' : !prod,
   uploadDir: path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '..', 'uploads')),
   smtp: process.env.SMTP_HOST
     ? { host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 587), user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }

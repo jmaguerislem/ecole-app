@@ -11,7 +11,7 @@ module.exports = function crud(cfg) {
   const {
     table, fields, required = [], read, write, from = `${table} t`, columns = 't.*', order = 't.id DESC',
     searchFields = [], filters = [], scope, annee = false, soft = true, deleteChecks = [],
-    beforeSave, afterSave, afterCommit, beforeDelete,
+    beforeSave, afterSave, afterCommit, afterCommitSync, beforeDelete,
   } = cfg;
   const allFields = annee ? [...fields, 'annee_scolaire'] : fields;
   const r = express.Router();
@@ -71,7 +71,8 @@ module.exports = function crud(cfg) {
       return row;
     });
     if (afterCommit) afterCommit({ ...ctx, row }).catch((e) => console.error(`[${table}] afterCommit`, e.message));
-    res.status(201).json(await fetchOne(row.id));
+    const extra = afterCommitSync ? await afterCommitSync({ ...ctx, row }).catch((e) => { console.error(`[${table}] afterCommitSync`, e.message); return null; }) : null;
+    res.status(201).json({ ...(await fetchOne(row.id)), ...(extra || {}) });
   }));
 
   r.put('/:id(\\d+)', allow(...write), ah(async (req, res) => {
@@ -97,7 +98,8 @@ module.exports = function crud(cfg) {
       return row;
     });
     if (afterCommit) afterCommit({ ...ctx, row }).catch((e) => console.error(`[${table}] afterCommit`, e.message));
-    res.json(await fetchOne(id));
+    const extra = afterCommitSync ? await afterCommitSync({ ...ctx, row }).catch((e) => { console.error(`[${table}] afterCommitSync`, e.message); return null; }) : null;
+    res.json({ ...(await fetchOne(id)), ...(extra || {}) });
   }));
 
   r.delete('/:id(\\d+)', allow(...write), ah(async (req, res) => {

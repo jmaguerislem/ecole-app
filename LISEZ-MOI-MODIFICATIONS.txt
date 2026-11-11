@@ -1,0 +1,3 @@
+Copier ces fichiers par-dessus votre projet (mêmes chemins).
+SUPPRIMER : frontend/src/pages/StatsGlobales.jsx (ancien dashboard super-admin, remplacé).
+Puis : cd backend && npm run migrate && npm run seed:demo ; renseigner SMTP_* et APP_URL dans backend/.env.

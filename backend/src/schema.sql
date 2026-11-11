@@ -349,3 +349,74 @@ CREATE TABLE IF NOT EXISTS data_migrations (
   nom TEXT PRIMARY KEY,
   applique_le TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ===== Évolutions : espace propriétaire (loyers), invitations parents, site partagé =====
+-- 6) Contrat de location d'une école (une ligne par école). Données du PROPRIÉTAIRE : jamais accessibles aux comptes d'école (voir tenant.sql).
+CREATE TABLE IF NOT EXISTS school_contracts (
+  school_id INT PRIMARY KEY REFERENCES schools(id) ON DELETE CASCADE,
+  loyer_mensuel NUMERIC(10,2) NOT NULL CHECK (loyer_mensuel >= 0),
+  jour_echeance SMALLINT NOT NULL DEFAULT 5 CHECK (jour_echeance BETWEEN 1 AND 28),
+  date_debut DATE NOT NULL,
+  date_fin DATE,
+  caution NUMERIC(10,2) CHECK (caution IS NULL OR caution >= 0),
+  notes TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (date_fin IS NULL OR date_fin >= date_debut)
+);
+-- 7) Échéances mensuelles (loyer PRÉVU) et encaissements (loyer RÉELLEMENT encaissé). Un revenu = une ligne de loyer_encaissements, jamais une échéance.
+CREATE TABLE IF NOT EXISTS loyer_echeances (
+  id SERIAL PRIMARY KEY,
+  school_id INT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+  periode DATE NOT NULL,              -- 1er jour du mois concerné
+  echeance DATE NOT NULL,             -- date limite de paiement
+  montant_du NUMERIC(10,2) NOT NULL CHECK (montant_du >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (school_id, periode)
+);
+CREATE TABLE IF NOT EXISTS loyer_encaissements (
+  id SERIAL PRIMARY KEY,
+  echeance_id INT NOT NULL REFERENCES loyer_echeances(id) ON DELETE CASCADE,
+  school_id INT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+  montant NUMERIC(10,2) NOT NULL CHECK (montant > 0),
+  date_paiement DATE NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('especes','virement','cheque','mobile_money')),
+  reference TEXT,
+  notes TEXT,
+  created_by INT REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_loyer_ech_school ON loyer_echeances(school_id, periode);
+CREATE INDEX IF NOT EXISTS idx_loyer_enc_ech ON loyer_encaissements(echeance_id);
+-- 8) Site (bâtiment) de l'école : deux écoles du même site partagent leurs locaux (même nom de salle = même salle physique)
+ALTER TABLE schools ADD COLUMN IF NOT EXISTS site TEXT;
+-- 9) Invitations : jeton à usage unique pour définir son mot de passe (jamais de mot de passe envoyé par e-mail). Seul le hachage est stocké.
+CREATE TABLE IF NOT EXISTS password_setup_tokens (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ,
+  essais SMALLINT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_pst_user ON password_setup_tokens(user_id);
+-- Suivi de l'e-mail d'invitation (pour détecter les échecs d'envoi et proposer « Renvoyer »)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS invitation_envoyee_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS invitation_erreur TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS mot_de_passe_defini BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- ===== Évolutions : mot de passe temporaire, profil super-admin, début d'abonnement, comptes de démonstration =====
+-- Compte créé avec un mot de passe temporaire (ex. parent) : l'utilisateur DOIT le changer à sa première connexion
+ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
+-- Photo de profil (nom de fichier servi par /api/files/…, rangé dans uploads/<école>/ ou uploads/platform/ pour le super-administrateur)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS photo TEXT;
+ALTER TABLE schools ADD COLUMN IF NOT EXISTS subscription_start DATE;
+UPDATE schools SET subscription_start = created_at::date WHERE subscription_start IS NULL;
+ALTER TABLE schools ALTER COLUMN subscription_start SET DEFAULT CURRENT_DATE;
+-- Comptes de démonstration de la page de connexion : (groupe 1..3, rôle) → vrai compte de la base. Aucun mot de passe n'est stocké ici.
+CREATE TABLE IF NOT EXISTS demo_accounts (
+  groupe INT NOT NULL CHECK (groupe BETWEEN 1 AND 3),
+  role TEXT NOT NULL CHECK (role IN ('admin','comptable','eleve','parent','enseignant')),
+  user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (groupe, role)
+);

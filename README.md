@@ -37,6 +37,13 @@ Production sans Docker : `npm run build && NODE_ENV=production npm start` (le ba
 
 > **Avant toute mise en production** : définir un `JWT_SECRET` aléatoire (32+ caractères), changer le mot de passe admin, ne pas lancer le seed.
 
+## Évolutions : parents, espace propriétaire, démonstration
+
+- **Parents créés automatiquement** : à l'ajout d'un élève, le compte parent est créé s'il n'existe pas (identifiant = e-mail), avec un mot de passe temporaire généré par le serveur et envoyé par e-mail avec nom, prénom et classe de l'enfant. Parent déjà existant : l'enfant est rattaché, e-mail d'information. Le mot de passe temporaire doit être changé à la première connexion (l'API refuse tout le reste avant). « Renvoyer l'invitation » (page Parents) génère un nouveau mot de passe temporaire tant que le compte n'est pas activé. **L'envoi réel exige SMTP_HOST/SMTP_USER/SMTP_PASS/MAIL_FROM et APP_URL** (voir `.env.example`).
+- **Espace super-admin** (menu déroulant) : Accueil (tableau de bord dynamique), Les écoles, Statistiques financières (loyers payés/impayés, filtres école/année/mois) ; page Mon profil (nom, prénom, e-mail, téléphone, mot de passe, photo).
+- **Comptes de démonstration** sous le formulaire de connexion : `npm run seed:demo` puis un clic = connexion à un vrai compte (aucun mot de passe côté navigateur). Désactivé en production sauf `DEMO_LOGIN=true`.
+- **Tests** : `npm test` (backend) – nouveaux tests dans `tests/superadmin-demo.test.js` et `tests/mobile-evolutions.test.js`.
+
 ## Plateforme multi-écoles (SaaS)
 
 Chaque école est isolée des autres : un utilisateur ne voit et ne modifie que les données de **son** école. Détail et correspondance avec le guide du cours : [`docs/ISOLATION-ECOLES.md`](docs/ISOLATION-ECOLES.md).
@@ -129,3 +136,7 @@ Dockerfile, docker-compose.yml, .env.example
 ## 5 écoles de démonstration
 `npm run seed:ecoles` (Docker : `docker compose exec app node src/seed-ecoles.js`) crée 5 écoles complètes (direction, secrétariat, 6 enseignants, 18 parents, 30 élèves, classes, matières, emploi du temps, tarifs avec historique, paiements, notes, absences, annonces). Relançable sans risque (une école déjà présente est ignorée). La liste des comptes est dans `docs/COMPTES_DEMO.md` (mot de passe commun `Demo@2026!`).
 **« Faire l'appel »** est réservé aux enseignants (dans leurs classes) ; la direction saisit/consulte les absences depuis la page Absences.
+
+## Application mobile Flutter
+
+L'application mobile est désormais **native Flutter** (dossier `mobile/`, voir `mobile/README.md`). Compte rendu de la migration, décisions et limites : `MIGRATION_FLUTTER.md`.

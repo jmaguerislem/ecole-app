@@ -357,3 +357,43 @@ html.native body{-webkit-user-select:none;user-select:none}
 html.native input,html.native textarea,html.native [contenteditable]{-webkit-user-select:text;user-select:text}
 html.native .top{padding-top:calc(.5rem + env(safe-area-inset-top));padding-left:calc(1rem + env(safe-area-inset-left));padding-right:calc(1rem + env(safe-area-inset-right))}
 html.native .side{padding-top:env(safe-area-inset-top)}
+
+/* ---------- Espace super-administrateur : menu déroulant, profil ---------- */
+.super-shell{min-height:100vh}
+.super-shell .content{max-width:1280px;margin:0 auto;padding:1.5rem}
+.super-shell .top .brand-mark{background:var(--brand);color:#fff;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;flex:none}
+.super-shell .top-school{display:inline-block;margin:0 .5rem}
+@media(max-width:640px){.super-shell .top-school{display:none!important}.super-shell .content{padding:1rem}}
+.menu-drop{position:relative}
+.menu-drop > .btn{gap:.5rem}
+.menu-list{position:absolute;left:0;top:calc(100% + 6px);z-index:50;min-width:260px;margin:0;padding:.35rem;list-style:none;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);box-shadow:var(--shadow-lg)}
+.menu-list a{display:flex;align-items:center;gap:.7rem;min-height:44px;padding:.45rem .7rem;border-radius:var(--r-sm);color:var(--text);text-decoration:none;font-weight:600}
+.menu-list a:hover{background:var(--surface-2)}
+.menu-list a[aria-current=page]{background:var(--accent-soft);color:var(--accent-hover)}
+.avatar-img,.profile-photo{border-radius:50%;object-fit:cover;flex:none}
+.avatar-img{width:36px;height:36px} .profile-photo{width:96px;height:96px}
+
+/* ---------- Graphiques : colonnes groupées, barres empilées ---------- */
+.legend.inline{display:flex;flex-wrap:wrap;gap:.4rem 1rem;margin-bottom:.6rem}
+.cols-wrap svg{width:100%;height:auto;display:block}
+.axis{font-size:11px;fill:var(--muted)}
+.stacked{list-style:none;margin:0;padding:0;display:grid;gap:.55rem}
+.stacked li{display:grid;grid-template-columns:minmax(90px,28%) 1fr 3rem;align-items:center;gap:.6rem}
+.stacked .bar-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9rem}
+.stacked .bar-val{text-align:right;font-variant-numeric:tabular-nums}
+.stack-track{display:flex;height:18px;min-width:6px;border-radius:5px;overflow:hidden;background:var(--surface-2)}
+.stack-seg{display:block;min-width:2px}
+
+/* ---------- Page de connexion : comptes de démonstration ---------- */
+.demo{margin-top:1.25rem;padding:.9rem 1rem;border:1px dashed var(--line-strong);border-radius:var(--r-md);background:var(--surface-2)}
+.demo h2{font-size:1rem;margin:0 0 .1rem}
+.demo > p{margin:0 0 .6rem}
+.demo-group{display:grid;gap:.35rem;padding:.5rem 0;border-top:1px solid var(--line)}
+.demo-school{display:flex;align-items:baseline;gap:.5rem;min-width:0}
+.demo-school b{color:var(--brand);font-size:.9rem;flex:none}
+.demo-school span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.demo-roles{display:flex;flex-wrap:wrap;gap:.35rem}
+.demo-btn{display:inline-flex;align-items:center;gap:.35rem;font:inherit;font-size:.82rem;font-weight:700;min-height:36px;padding:.2rem .65rem;border:1px solid var(--line-strong);border-radius:99px;background:var(--surface);color:var(--brand);cursor:pointer;transition:border-color .15s,background .15s}
+.demo-btn:hover:not(:disabled){border-color:var(--accent);background:var(--accent-soft)}
+.demo-btn:disabled{opacity:.6;cursor:wait}
+.demo .spinner{width:14px;height:14px}

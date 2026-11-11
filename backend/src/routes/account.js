@@ -10,6 +10,7 @@ const { audit } = require('../audit');
 const { ah, HttpError } = require('../util');
 const config = require('../config');
 const V = require('../services/validate');
+const { definirMotDePasse, reinitialiser } = require('../services/invitations');
 
 const pub = express.Router(); // routes publiques
 const priv = express.Router(); // routes authentifiées
@@ -42,6 +43,16 @@ pub.post('/public/signup', ah(async (req, res) => {
   res.status(201).json({ ok: true, slug, essai_jusqu_au: fin });
 }));
 
+// Réponse de connexion (jeton + profil public). `u` = ligne users + school_nom/slug/ville. Partagée avec la connexion de démonstration (routes/demo.js).
+const reponseConnexion = (u) => ({
+  token: sign(u),
+  user: {
+    id: u.id, email: u.email, role: u.role, nom: u.nom, prenom: u.prenom, telephone: u.telephone ?? null, photo: u.photo ?? null,
+    must_change_password: !!u.must_change_password, // mot de passe temporaire : l'interface impose de le changer avant toute autre action
+    school: u.school_id ? { id: u.school_id, nom: u.school_nom, slug: u.school_slug, ville: u.school_ville, label: libelleEcole({ nom: u.school_nom, ville: u.school_ville }) } : null,
+  },
+});
+
 pub.post('/auth/login', ah(async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) throw new HttpError(400, 'E-mail et mot de passe requis');
@@ -58,7 +69,21 @@ pub.post('/auth/login', ah(async (req, res) => {
     if (refus) throw new HttpError(403, refus);
     await runWith({ schoolId: u.school_id, schoolNom: u.school_nom }, () => audit(null, u, 'login', 'users', u.id, null, null));
   }
-  res.json({ token: sign(u), user: { id: u.id, email: u.email, role: u.role, nom: u.nom, prenom: u.prenom, school: u.school_id ? { id: u.school_id, nom: u.school_nom, slug: u.school_slug, ville: u.school_ville, label: libelleEcole({ nom: u.school_nom, ville: u.school_ville }) } : null } });
+  res.json(reponseConnexion(u));
+}));
+
+// Première connexion d'un parent (code reçu par e-mail) ou mot de passe oublié
+pub.post('/auth/set-password', ah(async (req, res) => {
+  const { email, code, password, confirmation } = req.body || {};
+  if ([email, code, password].some((v) => typeof v !== 'string' || v.length > 200)) throw new HttpError(400, 'E-mail, code et mot de passe requis');
+  if (confirmation !== undefined && confirmation !== password) throw new HttpError(400, 'La confirmation du mot de passe ne correspond pas');
+  res.json(await definirMotDePasse({ email, code, password }));
+}));
+pub.post('/auth/forgot-password', ah(async (req, res) => {
+  const { email } = req.body || {};
+  if (typeof email !== 'string' || !email.includes('@') || email.length > 120) throw new HttpError(400, 'Adresse e-mail invalide');
+  await reinitialiser(email);
+  res.json({ ok: true, message: 'Si un compte existe pour cette adresse, un e-mail contenant un code vient d\'être envoyé.' });
 }));
 
 priv.get('/auth/me', (req, res) => res.json({ ...req.user, school: req.school }));
@@ -71,7 +96,7 @@ priv.post('/auth/change-password', ah(async (req, res) => {
   if (nouveau === ancien) throw new HttpError(400, "Le nouveau mot de passe doit être différent de l'ancien");
   const u = (await qa('SELECT password_hash FROM users WHERE id=$1', [req.user.id])).rows[0]; // propre compte (id issu de la session)
   if (!(await bcrypt.compare(ancien || '', u.password_hash))) throw new HttpError(400, 'Ancien mot de passe incorrect');
-  await qa('UPDATE users SET password_hash=$1 WHERE id=$2', [await bcrypt.hash(nouveau, 12), req.user.id]);
+  await qa('UPDATE users SET password_hash=$1, mot_de_passe_defini=TRUE, must_change_password=FALSE WHERE id=$2', [await bcrypt.hash(nouveau, 12), req.user.id]);
   await audit(null, req.user, 'password_change', 'users', req.user.id, null, null);
   res.json({ ok: true });
 }));
@@ -107,8 +132,10 @@ priv.post('/push/unsubscribe', ah(async (req, res) => {
 // --- Fichiers (accès authentifié) ---
 // Les fichiers sont rangés par école (uploads/<school_id>/…) : on ne sert que le dossier de l'école de l'utilisateur
 priv.get('/files/:name', (req, res) => {
-  if (!req.user.school_id) return res.status(404).json({ error: 'Fichier introuvable' });
-  res.sendFile(path.join(config.uploadDir, String(req.user.school_id), path.basename(req.params.name)), (err) => { if (err && !res.headersSent) res.status(404).json({ error: 'Fichier introuvable' }); });
+  // Le super-administrateur n'a pas d'école : ses fichiers (photo de profil) sont dans uploads/platform/
+  const dossier = req.user.school_id ? String(req.user.school_id) : req.user.role === 'superadmin' ? 'platform' : null;
+  if (!dossier) return res.status(404).json({ error: 'Fichier introuvable' });
+  res.sendFile(path.join(config.uploadDir, dossier, path.basename(req.params.name)), (err) => { if (err && !res.headersSent) res.status(404).json({ error: 'Fichier introuvable' }); });
 });
 
 // --- Journaux (admin) ---
@@ -154,4 +181,4 @@ priv.post('/rgpd/effacement/:id(\\d+)', allow('admin'), ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
-module.exports = { pub, priv };
+module.exports = { pub, priv, reponseConnexion };

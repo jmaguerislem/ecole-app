@@ -17,8 +17,10 @@ const config = require('../config');
 const V = require('../services/validate');
 const { verifierQuota } = require('../services/quotas');
 const { genererEmailEleve } = require('../services/emailEleve');
+const { trouverOuCreerParent, inviterParent } = require('../services/invitations');
 const { qa, runWith } = require('../db');
 const { abonnementBloque } = require('../auth');
+const { verifierOuRefuser, trouverConflits, suggerer, verrouiller } = require('../services/edt-conflits');
 
 const CLASSE_NOM = (a) => `${a}.niveau||COALESCE(' '||${a}.section,'')`;
 
@@ -37,33 +39,45 @@ const creneaux = crud({
     return null;
   },
   async beforeSave({ merged, old, user, client, data }) {
-    if (data.jour !== undefined) data.jour = V.nombre(data.jour, 'Le jour', { min: 1, max: 6, entier: true, required: true });
-    for (const [k, l] of [['heure_debut', "L'heure de début"], ['heure_fin', "L'heure de fin"]]) if (data[k] !== undefined) { data[k] = V.heure(data[k], l); merged[k] = data[k]; }
-    merged.heure_debut = String(merged.heure_debut).slice(0, 5); merged.heure_fin = String(merged.heure_fin).slice(0, 5);
-    if (merged.heure_debut < '07:00' || merged.heure_fin > '19:00') throw new HttpError(400, 'Les cours doivent se situer entre 07:00 et 19:00');
-    const minutes = (h) => Number(h.slice(0, 2)) * 60 + Number(h.slice(3, 5));
-    const duree = minutes(merged.heure_fin) - minutes(merged.heure_debut);
-    if (duree < 15) throw new HttpError(400, 'Un cours dure au moins 15 minutes');
-    if (duree > 240) throw new HttpError(400, 'Un cours ne peut pas dépasser 4 heures');
-    if (user.role === 'enseignant' && Number(merged.enseignant_id) !== user.id) throw new HttpError(403, 'Un enseignant ne peut gérer que ses propres créneaux');
-    if (merged.heure_debut >= merged.heure_fin) throw new HttpError(400, "L'heure de fin doit suivre l'heure de début");
-    if (merged.salle_id) {
-      const s = await client.query('SELECT disponible FROM salles WHERE id=$1 AND deleted_at IS NULL', [merged.salle_id]);
-      if (!s.rows[0]) throw new HttpError(400, 'Salle introuvable');
-      if (!s.rows[0].disponible) throw new HttpError(409, "Cette salle n'est pas disponible");
-    }
-    const { rows } = await client.query(
-      `SELECT t.enseignant_id, t.salle_id, t.classe_id FROM creneaux t
-       WHERE t.deleted_at IS NULL AND t.annee_scolaire=$1 AND t.jour=$2 AND t.heure_debut<$4 AND t.heure_fin>$3 AND t.id<>$5
-         AND (t.enseignant_id=$6 OR (t.salle_id IS NOT NULL AND t.salle_id=$7) OR t.classe_id=$8) LIMIT 1`,
-      [merged.annee_scolaire, merged.jour, merged.heure_debut, merged.heure_fin, old ? old.id : 0, merged.enseignant_id, merged.salle_id || null, merged.classe_id]);
-    if (rows[0]) {
-      const c = rows[0];
-      const quoi = Number(c.enseignant_id) === Number(merged.enseignant_id) ? "L'enseignant" : c.salle_id && Number(c.salle_id) === Number(merged.salle_id) ? 'La salle' : 'La classe';
-      throw new HttpError(409, `Conflit d'emploi du temps : ${quoi} est déjà affecté(e) à un autre cours sur ce créneau.`);
-    }
+    await controlerCreneau({ merged, old, user, client, data });
+    await verrouiller(client, merged.jour); // écritures du même jour sérialisées : pas de course entre utilisateurs
+    await verifierOuRefuser(client, merged, user.school_id, { exclureId: old ? old.id : 0 }); // création ET modification (le créneau modifié est exclu de la comparaison)
   },
 });
+// Pré-vérification pour l'interface (même règles, rien n'est enregistré) : renvoie les conflits et des suggestions
+creneaux.post('/verifier', allow('admin', 'enseignant'), ah(async (req, res) => {
+  const b = req.body || {}; const id = b.id ? Number(b.id) : 0;
+  const old = id ? (await q('SELECT * FROM creneaux WHERE id=$1 AND deleted_at IS NULL', [id])).rows[0] : null;
+  if (id && !old) throw new HttpError(404, 'Créneau introuvable');
+  const data = {};
+  for (const f of ['classe_id', 'matiere_id', 'enseignant_id', 'salle_id', 'jour', 'heure_debut', 'heure_fin']) if (b[f] !== undefined) data[f] = b[f] === '' ? null : b[f];
+  const merged = { ...(old || {}), ...data, annee_scolaire: old?.annee_scolaire || b.annee_scolaire || config.anneeCourante };
+  const client = { query: (t, p) => q(t, p) };
+  await controlerCreneau({ merged, old, user: req.user, client, data });
+  const conflits = await trouverConflits(client, merged, req.user.school_id, { exclureId: old ? old.id : 0 });
+  res.json({ ok: conflits.length === 0, conflits, suggestions: conflits.length ? await suggerer(client, merged, req.user.school_id, { exclureId: old ? old.id : 0 }) : null });
+}));
+
+// Contrôles de forme d'un créneau (horaires, durée, salle disponible, droits)
+async function controlerCreneau({ merged, old, user, client, data }) {
+  for (const k of ['classe_id', 'matiere_id', 'enseignant_id', 'jour', 'heure_debut', 'heure_fin']) if (merged[k] === undefined || merged[k] === null || merged[k] === '') throw new HttpError(400, 'Champs obligatoires manquants : classe, matière, enseignant, jour, heures');
+  if (data.jour !== undefined) data.jour = V.nombre(data.jour, 'Le jour', { min: 1, max: 6, entier: true, required: true });
+  merged.jour = data.jour ?? merged.jour;
+  for (const [k, l] of [['heure_debut', "L'heure de début"], ['heure_fin', "L'heure de fin"]]) if (data[k] !== undefined) { data[k] = V.heure(data[k], l); merged[k] = data[k]; }
+  merged.heure_debut = String(merged.heure_debut).slice(0, 5); merged.heure_fin = String(merged.heure_fin).slice(0, 5);
+  if (merged.heure_debut < '07:00' || merged.heure_fin > '19:00') throw new HttpError(400, 'Les cours doivent se situer entre 07:00 et 19:00');
+  const minutes = (h) => Number(h.slice(0, 2)) * 60 + Number(h.slice(3, 5));
+  const duree = minutes(merged.heure_fin) - minutes(merged.heure_debut);
+  if (duree < 15) throw new HttpError(400, 'Un cours dure au moins 15 minutes');
+  if (duree > 240) throw new HttpError(400, 'Un cours ne peut pas dépasser 4 heures');
+  if (user.role === 'enseignant' && Number(merged.enseignant_id) !== user.id) throw new HttpError(403, 'Un enseignant ne peut gérer que ses propres créneaux');
+  if (merged.heure_debut >= merged.heure_fin) throw new HttpError(400, "L'heure de fin doit suivre l'heure de début");
+  if (merged.salle_id) {
+    const s = await client.query('SELECT disponible FROM salles WHERE id=$1 AND deleted_at IS NULL', [merged.salle_id]);
+    if (!s.rows[0]) throw new HttpError(400, 'Salle introuvable');
+    if (!s.rows[0].disponible) throw new HttpError(409, "Cette salle n'est pas disponible");
+  }
+}
 
 // ================= Paiements =================
 const paiementsExtra = express.Router();
@@ -299,13 +313,7 @@ preActions.post('/:id(\\d+)/valider', allow('admin', 'comptable'), ah(async (req
   const out = await tx(async (cl) => {
     const p = (await cl.query("SELECT * FROM preinscriptions WHERE id=$1 AND statut='en_attente' AND deleted_at IS NULL FOR UPDATE", [req.params.id])).rows[0];
     if (!p) throw new HttpError(404, 'Pré-inscription introuvable ou déjà traitée');
-    let parent = (await cl.query('SELECT id FROM users WHERE email=$1 AND deleted_at IS NULL', [p.parent_email])).rows[0];
-    let motDePasse = null;
-    if (!parent) {
-      motDePasse = crypto.randomBytes(6).toString('base64url');
-      parent = (await cl.query("INSERT INTO users(email,password_hash,role,nom,prenom,telephone,consentement_rgpd_at) VALUES ($1,$2,'parent',$3,$4,$5,now()) RETURNING id",
-        [p.parent_email, await bcrypt.hash(motDePasse, 12), p.parent_nom, p.parent_prenom, p.parent_telephone])).rows[0];
-    }
+    const parent = await trouverOuCreerParent(cl, { nom: p.parent_nom, prenom: p.parent_prenom, email: p.parent_email, telephone: p.parent_telephone }, { schoolId: req.user.school_id });
     let classe_id = null;
     if (req.body.classe_id) {
       const c = (await cl.query('SELECT capacite, (SELECT COUNT(*) FROM eleves e WHERE e.classe_id=c.id AND e.deleted_at IS NULL) n FROM classes c WHERE id=$1', [req.body.classe_id])).rows[0];
@@ -318,12 +326,15 @@ preActions.post('/:id(\\d+)/valider', allow('admin', 'comptable'), ah(async (req
       [p.eleve_nom, p.eleve_prenom, p.date_naissance, p.sexe, p.adresse, p.antecedents_medicaux, p.annee_scolaire, classe_id,
         await genererEmailEleve({ nom: p.eleve_nom, prenom: p.eleve_prenom, date_naissance: p.date_naissance })])).rows[0];
     await cl.query('UPDATE eleves SET matricule=$1 WHERE id=$2', [`E${anneeDebut(p.annee_scolaire)}${pad(el.id, 4)}`, el.id]);
-    await cl.query('INSERT INTO eleve_parents(eleve_id,parent_id) VALUES ($1,$2)', [el.id, parent.id]);
+    await cl.query('INSERT INTO eleve_parents(eleve_id,parent_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [el.id, parent.id]);
     await cl.query("UPDATE preinscriptions SET statut='validee', eleve_id=$1, traitee_par=$2 WHERE id=$3", [el.id, req.user.id, p.id]);
     await audit(cl, req.user, 'validate', 'preinscriptions', p.id, p, { eleve_id: el.id });
-    return { eleve_id: el.id, parent_email: p.parent_email, mot_de_passe_temporaire: motDePasse };
+    return { eleve_id: el.id, parent_id: parent.id, parent_email: p.parent_email, compte_cree: parent.cree, temp: parent.motDePasseTemporaire || null, eleve_nom: `${p.eleve_prenom} ${p.eleve_nom}` };
   });
-  res.json(out);
+  // E-mail au parent (identifiants + mot de passe temporaire s'il vient d'être créé) après validation : un échec d'envoi n'annule pas la validation
+  const r = await inviterParent({ userId: out.parent_id, ecole: req.school?.label || req.school?.nom || 'École', tempPassword: out.temp });
+  const { parent_id, eleve_nom, temp, ...rest } = out;
+  res.json({ ...rest, email_envoye: r.ok, erreur: r.ok ? null : r.error });
 }));
 preActions.post('/:id(\\d+)/refuser', allow('admin', 'comptable'), ah(async (req, res) => {
   const r = await q("UPDATE preinscriptions SET statut='refusee', motif_refus=$1, traitee_par=$2 WHERE id=$3 AND statut='en_attente' RETURNING id", [req.body.motif || null, req.user.id, req.params.id]);

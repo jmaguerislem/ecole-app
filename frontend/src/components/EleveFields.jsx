@@ -127,23 +127,25 @@ export function ClassePicker({ f, value, onChange, options = [], reloadOptions }
 }
 
 // ---------- Parents : liste de parents existants + « Ajouter un parent » ----------
-export function ParentPicker({ f, value, onChange, options = [], reloadOptions }) {
+// Nouveau parent : aucun mot de passe à saisir. Il est envoyé avec l'élève (champ `parent`) : à l'enregistrement, le serveur crée le compte
+// s'il n'existe pas (ou rattache l'enfant au compte existant de même e-mail), génère un mot de passe temporaire et l'envoie par e-mail avec les infos de l'enfant.
+export function ParentPicker({ f, value, onChange, options = [], form, patch }) {
   const { user } = useAuth();
   const canCreate = user.role === 'admin';
   const ids = (value || []).map(Number);
+  const nouveau = form?.parent || null;
   const [mode, setMode] = useState(false);
-  const empty = { nom: '', prenom: '', email: '', telephone: '', password: '', password_confirm: '' };
-  const [n, setN] = useState(empty); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
+  const empty = { nom: '', prenom: '', email: '', telephone: '' };
+  const [n, setN] = useState(empty); const [err, setErr] = useState('');
   const name = (id) => options.find((o) => o.value === id)?.label || `Parent #${id}`;
   const pick = (v) => { if (v === NEW) { setMode(true); setErr(''); } else if (v && !ids.includes(Number(v))) onChange([...ids, Number(v)]); };
-  const create = async () => {
+  const add = () => {
     setErr('');
-    if (n.password !== n.password_confirm) { setErr('La confirmation du mot de passe ne correspond pas.'); return; }
-    setBusy(true);
-    try {
-      const u = await api('/users', { method: 'POST', body: { ...n, role: 'parent' } }); // le serveur revérifie la confirmation
-      await reloadOptions(); if (ids.length < 4) onChange([...ids, u.id]); setMode(false); setN(empty);
-    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+    const email = n.email.trim().toLowerCase();
+    const existant = options.find((o) => o.raw?.email?.toLowerCase() === email);
+    if (existant) { if (!ids.includes(existant.value)) onChange([...ids, existant.value]); setMode(false); setN(empty); return; } // compte déjà existant : simple rattachement
+    if (ids.length + 1 > 4) { setErr('4 parents maximum.'); return; }
+    patch({ parent: { ...n, email } }); setMode(false); setN(empty);
   };
   const set = (k) => (e) => setN({ ...n, [k]: e.target.value });
   return <>
@@ -151,21 +153,24 @@ export function ParentPicker({ f, value, onChange, options = [], reloadOptions }
     <select id={`f-${f.name}`} value="" onChange={(e) => pick(e.target.value)} disabled={ids.length >= 4}>
       <option value="">{ids.length >= 4 ? '4 parents maximum' : '— Sélectionner un parent enregistré —'}</option>
       {options.filter((o) => !ids.includes(o.value)).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-      {canCreate && <option value={NEW}>➕ Ajouter un parent…</option>}
+      {canCreate && !nouveau && <option value={NEW}>➕ Ajouter un parent…</option>}
     </select>
-    {ids.length > 0 && <ul className="chips" aria-label="Parents sélectionnés">{ids.map((id) => <li key={id} className="chip">{name(id)}<button type="button" aria-label={`Retirer ${name(id)}`} onClick={() => onChange(ids.filter((x) => x !== id))}><Icon name="x" size={14} /></button></li>)}</ul>}
+    {(ids.length > 0 || nouveau) && <ul className="chips" aria-label="Parents sélectionnés">
+      {ids.map((id) => <li key={id} className="chip">{name(id)}<button type="button" aria-label={`Retirer ${name(id)}`} onClick={() => onChange(ids.filter((x) => x !== id))}><Icon name="x" size={14} /></button></li>)}
+      {nouveau && <li className="chip">{nouveau.prenom} {nouveau.nom} (nouveau compte)<button type="button" aria-label="Retirer le nouveau parent" onClick={() => patch({ parent: undefined })}><Icon name="x" size={14} /></button></li>}
+    </ul>}
+    {nouveau && <div className="help">Un compte parent sera créé pour {nouveau.email} à l'enregistrement : identifiant, mot de passe temporaire et informations de l'enfant lui seront envoyés par e-mail.</div>}
     {mode && <fieldset className="inline-create" aria-label="Nouveau parent">
       <legend>Nouveau parent</legend>
       <div className="form-grid">
-        <div><label htmlFor="np-nom">Nom *</label><input id="np-nom" required {...NOM} value={n.nom} onChange={set('nom')} /></div>
-        <div><label htmlFor="np-prenom">Prénom *</label><input id="np-prenom" required {...NOM} value={n.prenom} onChange={set('prenom')} /></div>
-        <div><label htmlFor="np-email">E-mail (identifiant) *</label><input id="np-email" type="email" required {...EMAIL} value={n.email} onChange={set('email')} /></div>
+        <div><label htmlFor="np-nom">Nom *</label><input id="np-nom" {...NOM} value={n.nom} onChange={set('nom')} /></div>
+        <div><label htmlFor="np-prenom">Prénom *</label><input id="np-prenom" {...NOM} value={n.prenom} onChange={set('prenom')} /></div>
+        <div><label htmlFor="np-email">E-mail (identifiant) *</label><input id="np-email" type="email" {...EMAIL} value={n.email} onChange={set('email')} /></div>
         <div><label htmlFor="np-tel">Téléphone</label><input id="np-tel" type="tel" inputMode="numeric" maxLength={8} pattern="[0-9]{8}" placeholder="8 chiffres" value={n.telephone} onChange={set('telephone')} /></div>
-        <div><label htmlFor="np-pw">Mot de passe *</label><input id="np-pw" type="password" required {...MOT_DE_PASSE} autoComplete="new-password" value={n.password} onChange={set('password')} /></div>
-        <div><label htmlFor="np-pw2">Confirmer le mot de passe *</label><input id="np-pw2" type="password" required maxLength={128} autoComplete="new-password" value={n.password_confirm} onChange={set('password_confirm')} aria-invalid={!!n.password_confirm && n.password !== n.password_confirm} /></div>
       </div>
+      <p className="muted small">Le mot de passe est généré automatiquement et envoyé au parent par e-mail ; il devra le changer à sa première connexion. Si cet e-mail correspond déjà à un parent de l'école, l'enfant est simplement rattaché à son compte.</p>
       <Alert>{err}</Alert>
-      <div className="row"><button type="button" className="btn sm" disabled={busy || !n.nom || !n.prenom || !n.email || !n.password} onClick={create}>{busy ? 'Création…' : 'Créer le parent'}</button><button type="button" className="btn sec sm" onClick={() => { setMode(false); setErr(''); }}>Annuler</button></div>
+      <div className="row"><button type="button" className="btn sm" disabled={!n.nom.trim() || !n.prenom.trim() || !/^\S+@\S+\.\S+$/.test(n.email.trim())} onClick={add}>Ajouter ce parent</button><button type="button" className="btn sec sm" onClick={() => { setMode(false); setErr(''); }}>Annuler</button></div>
     </fieldset>}
   </>;
 }

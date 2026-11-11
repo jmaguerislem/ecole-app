@@ -17,6 +17,7 @@ const S = require('./routes/scolarite');
 const M = require('./routes/messagerie');
 const appel = require('./routes/appel');
 const saas = require('./routes/saas');
+const demo = require('./routes/demo');
 const stats = require('./routes/stats');
 const A = require('./services/absences');
 const { listerEcoles } = require('./services/ecoles');
@@ -30,18 +31,22 @@ app.use(cors(config.corsOrigin ? { origin: [...config.corsOrigin.split(',').map(
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
+app.use(['/api/auth/set-password', '/api/auth/forgot-password'], rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, message: { error: 'Trop de tentatives, réessayez plus tard' } }));
 app.use('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, message: { error: 'Trop de tentatives, réessayez plus tard' } }));
 // Liste publique des écoles ouvertes (listes déroulantes des écrans publics). Limiteur à part : elle est rechargée à chaque affichage de page,
 // contrairement aux envois de formulaires ci-dessous (20 par heure). Ne contient que id, nom, identifiant, ville et libellé.
 app.get('/api/public/schools', rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, message: { error: 'Trop de demandes, réessayez plus tard' } }),
   ah(async (_req, res) => { res.set('Cache-Control', 'no-store'); res.json(await listerEcoles()); }));
 app.use('/api/public', rateLimit({ windowMs: 60 * 60 * 1000, limit: 20, message: { error: 'Trop de demandes, réessayez plus tard' } }), S.publicPre);
+// Comptes de démonstration de la page de connexion (désactivés en production sauf DEMO_LOGIN=true)
+app.use('/api/demo', rateLimit({ windowMs: 15 * 60 * 1000, limit: 120, message: { error: 'Trop de tentatives, réessayez plus tard' } }), demo);
 app.use('/api', account.pub);
 
 // ----- Routes authentifiées -----
 app.use('/api', auth, account.priv);
 app.use('/api/saas', auth, saas); // gestion des écoles (super-administrateur)
 app.use('/api/stats', auth, stats); // statistiques globales (directeurs + super-administrateur) : compteurs agrégés de toutes les écoles
+app.use('/api/users', auth, E.usersExtra);
 app.use('/api/users', E.users);
 app.use('/api/classes', E.classes);
 app.use('/api/matieres', E.matieres);

@@ -16,6 +16,7 @@ function abonnementBloque(s) {
   return null;
 }
 
+const PASSWORD_CHANGE_OK = ['/api/auth/me', '/api/auth/change-password'];
 async function auth(req, res, next) {
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : null;
@@ -24,7 +25,7 @@ async function auth(req, res, next) {
   try {
     const p = jwt.verify(token, c.jwtSecret);
     const { rows } = await qa(
-      `SELECT u.id,u.email,u.role,u.nom,u.prenom,u.actif,u.school_id, s.nom AS school_nom, s.slug AS school_slug, s.ville AS school_ville, s.status AS school_status, s.subscription_end
+      `SELECT u.id,u.email,u.role,u.nom,u.prenom,u.telephone,u.photo,u.must_change_password,u.actif,u.school_id, s.nom AS school_nom, s.slug AS school_slug, s.ville AS school_ville, s.status AS school_status, s.subscription_end
        FROM users u LEFT JOIN schools s ON s.id=u.school_id WHERE u.id=$1 AND u.deleted_at IS NULL`, [p.sub]);
     u = rows[0];
     if (!u || !u.actif) return res.status(401).json({ error: 'Compte inactif ou supprimé' });
@@ -35,6 +36,10 @@ async function auth(req, res, next) {
   if (u.role !== 'superadmin') {
     const refus = abonnementBloque({ status: u.school_status, subscription_end: u.subscription_end });
     if (refus) return res.status(403).json({ error: refus });
+  }
+  // Mot de passe temporaire : tant qu'il n'est pas changé, seuls « qui suis-je » et « changer le mot de passe » sont accessibles (contrôle côté serveur, pas seulement dans l'interface)
+  if (u.must_change_password && !PASSWORD_CHANGE_OK.includes(req.originalUrl.split('?')[0].replace(/\/+$/, ''))) {
+    return res.status(403).json({ error: 'Vous devez d\'abord choisir un nouveau mot de passe (mot de passe temporaire).', code: 'password_change_required' });
   }
   const { school_nom, school_slug, school_ville, school_status, subscription_end, ...user } = u;
   req.user = user;

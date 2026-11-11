@@ -66,7 +66,11 @@ export function Enseignants() {
 }
 export function Parents() {
   const { user } = useAuth();
-  return <CrudPage title="Parents" endpoint="/users" query={{ role: 'parent' }} canWrite={isAdmin(user)} columns={userCols} fields={userFields()} transformBody={(b) => ({ ...b, role: 'parent' })} validate={verifierMotsDePasse} />;
+  const renvoyer = async (r, reload, { setInfo, setError }) => {
+    if (!window.confirm(`Générer un nouveau mot de passe temporaire pour ${r.nom_complet} et le lui renvoyer par e-mail ? L'ancien ne fonctionnera plus.`)) return;
+    try { const x = await api(`/users/${r.id}/renvoyer-invitation`, { method: 'POST' }); if (x.email_envoye) setInfo(`E-mail envoyé à ${r.email}.`); else setError(`L'e-mail n'a pas pu être envoyé (${x.erreur || 'erreur inconnue'}).`); reload(); } catch (e) { setError(e.message); }
+  };
+  return <CrudPage title="Parents" endpoint="/users" query={{ role: 'parent' }} canWrite={isAdmin(user)} columns={[...userCols, { label: 'Accès', render: (r) => (r.must_change_password ? <Pill kind="warn">{r.invitation_erreur ? 'E-mail non envoyé' : 'Mot de passe temporaire'}</Pill> : <Pill kind="ok">Activé</Pill>) }]} rowActions={(r, reload, h) => isAdmin(user) && r.must_change_password && <button className="btn sec sm" onClick={() => renvoyer(r, reload, h)}>Renvoyer l'invitation</button>} fields={userFields()} transformBody={(b) => ({ ...b, role: 'parent' })} validate={verifierMotsDePasse} />;
 }
 export const Comptes = () => <CrudPage title="Tous les comptes" endpoint="/users" columns={[...userCols, { label: 'Rôle', render: (r) => <Pill>{ROLES[r.role] || r.role}</Pill> }]} validate={verifierMotsDePasse} wideModal
   fields={userFields([{ name: 'role', label: 'Rôle', type: 'select', required: true, options: [['admin', 'Administrateur'], ['enseignant', 'Enseignant'], ['parent', 'Parent'], ['eleve', 'Élève'], ['comptable', 'Comptable / Secrétariat']].map(([value, label]) => ({ value, label })) }])} />;
@@ -99,7 +103,11 @@ export function Eleves() {
           { name: 'parent_ids', label: 'Parents / tuteurs', type: 'multiselect', optionsFrom: opt.parent, full: true, render: (p) => <ParentPicker {...p} /> },
           ...ELEVE_PASSWORD_FIELDS,
           { name: 'photo', label: 'Photo', full: true, render: (p) => <PhotoField {...p} /> }, { name: 'adresse', label: 'Adresse', full: true, maxLength: 200 }, { name: 'antecedents_medicaux', label: 'Antécédents médicaux', type: 'textarea', full: true, maxLength: 1000 }]}
-        defaults={{ statut: 'actif' }} wideModal validate={verifierMotsDePasse} transformBody={(b) => { const { email, ...rest } = b; return rest; }}
+        defaults={{ statut: 'actif' }} wideModal validate={verifierMotsDePasse} successMessage={(r, edition) => {
+          const i = r?.invitation; if (!i) return edition ? 'Modification enregistrée.' : 'Élève ajouté.';
+          const base = edition ? 'Modification enregistrée. ' : 'Élève ajouté. ';
+          return base + (i.compte_cree ? 'Compte parent créé automatiquement : ' : 'Parent existant rattaché à son compte : ') + (i.email_envoye ? 'un e-mail avec les informations de l\'enfant' + (i.compte_cree ? ', l\'identifiant et un mot de passe temporaire (à changer à la première connexion)' : '') + ' lui a été envoyé.' : `l'e-mail n'a pas pu être envoyé (${i.erreur || 'erreur inconnue'}). Le compte existe : renvoyez l'invitation depuis la page Parents.`);
+        }} transformBody={(b) => { const { email, ...rest } = b; return rest; }}
         rowActions={(r, reload, { setInfo, setError }) => <>
           <button className="btn sec sm" onClick={() => nav(`/bulletins?eleve=${r.id}`)}>Bulletin</button>
           {write && !r.classe_id && <button className="btn sec sm" onClick={async () => { try { const x = await api(`/eleves/${r.id}/auto-affectation`, { method: 'POST' }); setInfo(`Affecté automatiquement en ${x.niveau}.`); reload(); } catch (e) { setError(e.message); } }}>Affecter</button>}
@@ -113,7 +121,7 @@ function ValidateButton({ row, reload, setInfo, setError }) {
   const show = async () => { setClasses(await api('/classes')); setOpen(true); };
   const valider = async () => {
     try { const r = await api(`/preinscriptions/${row.id}/valider`, { method: 'POST', body: { classe_id: classe || undefined } });
-      setInfo(`Inscription validée. ${r.mot_de_passe_temporaire ? `Compte parent ${r.parent_email} créé – mot de passe temporaire : ${r.mot_de_passe_temporaire} (à transmettre au parent).` : 'Parent existant rattaché.'}`);
+      setInfo(`Inscription validée. ${r.compte_cree ? `Compte parent ${r.parent_email} créé : ` : 'Parent existant rattaché : '}${r.email_envoye ? (r.compte_cree ? 'un e-mail avec ses identifiants, un mot de passe temporaire (à changer à la première connexion) et les informations de l\'enfant lui a été envoyé.' : 'un e-mail d\'information lui a été envoyé.') : `l'e-mail n'a pas pu être envoyé (${r.erreur || 'erreur inconnue'}) : renvoyez l'invitation depuis la page Parents.`}`);
       setOpen(false); reload(); } catch (e) { setError(e.message); setOpen(false); }
   };
   const refuser = async () => { const motif = window.prompt('Motif du refus (optionnel) :'); if (motif === null) return; try { await api(`/preinscriptions/${row.id}/refuser`, { method: 'POST', body: { motif } }); reload(); } catch (e) { setError(e.message); } };

@@ -5,7 +5,7 @@ import Icon from './Icon.jsx';
 import { Alert, EmptyState, Field, Modal, PageHeader, SkeletonRows } from './ui.jsx';
 
 // Page CRUD générique : liste + recherche + Ajouter / Modifier / Supprimer (avec confirmation des suppressions contrôlées)
-export default function CrudPage({ title, endpoint, columns, fields, canWrite = true, query = {}, defaults = {}, annee = false, rowActions, toolbar, searchable = true, transformBody, hint, canEditRow, canDeleteRow, validate, onChange, above, wideModal }) {
+export default function CrudPage({ title, endpoint, columns, fields, canWrite = true, query = {}, defaults = {}, annee = false, rowActions, toolbar, searchable = true, transformBody, hint, canEditRow, canDeleteRow, validate, onChange, above, wideModal, successMessage }) {
   const { config } = useAuth();
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
@@ -51,8 +51,8 @@ export default function CrudPage({ title, endpoint, columns, fields, canWrite = 
       fields.forEach((f) => { if (f.type === 'password' && f.confirmOf && !f.sendConfirm) delete body[f.name]; }); // confirmation vérifiée ici, et renvoyée au serveur seulement si le champ le demande (sendConfirm)
       if (modal.row) fields.forEach((f) => { if (f.type === 'password' && !body[f.name]) delete body[f.name]; });
       if (transformBody) body = transformBody(body, modal.row);
-      await api(modal.row ? `${endpoint}/${modal.row.id}` : endpoint, { method: modal.row ? 'PUT' : 'POST', body });
-      setModal(null); setInfo(modal.row ? 'Modification enregistrée.' : 'Élément ajouté.'); load(); onChange?.();
+      const res = await api(modal.row ? `${endpoint}/${modal.row.id}` : endpoint, { method: modal.row ? 'PUT' : 'POST', body });
+      setModal(null); setInfo(successMessage?.(res, !!modal.row) || (modal.row ? 'Modification enregistrée.' : 'Élément ajouté.')); load(); onChange?.();
     } catch (err) { setFormError(err.message); } finally { setSaving(false); }
   };
   const remove = async (row) => {
