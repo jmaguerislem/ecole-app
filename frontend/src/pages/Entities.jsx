@@ -68,7 +68,9 @@ export function Parents() {
   const { user } = useAuth();
   const renvoyer = async (r, reload, { setInfo, setError }) => {
     if (!window.confirm(`Générer un nouveau mot de passe temporaire pour ${r.nom_complet} et le lui renvoyer par e-mail ? L'ancien ne fonctionnera plus.`)) return;
-    try { const x = await api(`/users/${r.id}/renvoyer-invitation`, { method: 'POST' }); if (x.email_envoye) setInfo(`E-mail envoyé à ${r.email}.`); else setError(`L'e-mail n'a pas pu être envoyé (${x.erreur || 'erreur inconnue'}).`); reload(); } catch (e) { setError(e.message); }
+    window.scrollTo({ top: 0, behavior: 'smooth' }); setError(''); setInfo(`Envoi de l'e-mail à ${r.email} en cours…`); // le résultat s'affiche en haut de la page
+    try { const x = await api(`/users/${r.id}/renvoyer-invitation`, { method: 'POST' }); if (x.email_envoye) { setError(''); setInfo(`E-mail envoyé à ${r.email}.`); } else { setInfo(''); setError(`L'e-mail n'a pas pu être envoyé (${x.erreur || 'erreur inconnue'}).`); } reload(); } catch (e) { setInfo(''); setError(e.message); }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
   return <CrudPage title="Parents" endpoint="/users" query={{ role: 'parent' }} canWrite={isAdmin(user)} columns={[...userCols, { label: 'Accès', render: (r) => (r.must_change_password ? <Pill kind="warn">{r.invitation_erreur ? 'E-mail non envoyé' : 'Mot de passe temporaire'}</Pill> : <Pill kind="ok">Activé</Pill>) }]} rowActions={(r, reload, h) => isAdmin(user) && r.must_change_password && <button className="btn sec sm" onClick={() => renvoyer(r, reload, h)}>Renvoyer l'invitation</button>} fields={userFields()} transformBody={(b) => ({ ...b, role: 'parent' })} validate={verifierMotsDePasse} />;
 }
