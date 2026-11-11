@@ -366,10 +366,6 @@ html.native .side{padding-top:env(safe-area-inset-top)}
 @media(max-width:640px){.super-shell .top-school{display:none!important}.super-shell .content{padding:1rem}}
 .menu-drop{position:relative}
 .menu-drop > .btn{gap:.5rem}
-.menu-list{position:absolute;left:0;top:calc(100% + 6px);z-index:50;min-width:260px;margin:0;padding:.35rem;list-style:none;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);box-shadow:var(--shadow-lg)}
-.menu-list a{display:flex;align-items:center;gap:.7rem;min-height:44px;padding:.45rem .7rem;border-radius:var(--r-sm);color:var(--text);text-decoration:none;font-weight:600}
-.menu-list a:hover{background:var(--surface-2)}
-.menu-list a[aria-current=page]{background:var(--accent-soft);color:var(--accent-hover)}
 .avatar-img,.profile-photo{border-radius:50%;object-fit:cover;flex:none}
 .avatar-img{width:36px;height:36px} .profile-photo{width:96px;height:96px}
 
@@ -397,3 +393,13 @@ html.native .side{padding-top:env(safe-area-inset-top)}
 .demo-btn:hover:not(:disabled){border-color:var(--accent);background:var(--accent-soft)}
 .demo-btn:disabled{opacity:.6;cursor:wait}
 .demo .spinner{width:14px;height:14px}
+
+/* ---------- Menu déroulant du super-admin : même design que la barre latérale de l'espace école ---------- */
+.menu-list{position:absolute;left:0;top:calc(100% + 8px);z-index:50;min-width:270px;margin:0;padding:.6rem;list-style:none;background:var(--brand);color:#fff;border-radius:var(--r-md);box-shadow:var(--shadow-lg)}
+.menu-list::before{content:"Navigation";display:block;margin:0 0 .35rem;padding:.2rem .65rem 0;font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#A9B8D8}
+.menu-list li{margin:0}
+.menu-list a{position:relative;display:flex;align-items:center;gap:.7rem;min-height:42px;padding:.45rem .65rem;border-radius:var(--r-sm);color:#C9D4EA;text-decoration:none;font-size:.96rem;font-weight:400;transition:background-color .15s,color .15s}
+.menu-list a:hover{background:rgba(255,255,255,.08);color:#fff}
+.menu-list a[aria-current=page]{background:rgba(255,255,255,.14);color:#fff;font-weight:700}
+.menu-list a[aria-current=page]::before{content:"";position:absolute;left:-.6rem;top:8px;bottom:8px;width:4px;border-radius:0 4px 4px 0;background:#F0645A}
+.menu-list :focus-visible{outline-color:#fff}
