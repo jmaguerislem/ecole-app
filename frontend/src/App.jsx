@@ -27,6 +27,7 @@ import ChangerMotDePasse from './pages/ChangerMotDePasse.jsx';
 import SuperLayout from './components/SuperLayout.jsx';
 import StatsEcole from './pages/StatsEcole.jsx';
 import Decisionnel from './pages/Decisionnel.jsx';
+import { AbsencesEnseignants, Reclamations, Retards } from './pages/Suivi.jsx';
 
 // Menu par rôle (RBAC côté interface – le serveur applique de toute façon les droits).
 // Les entrées sont regroupées par domaine pour réduire la charge de lecture d'un menu de 22 liens.
@@ -51,11 +52,14 @@ const NAV = [
   { title: 'Vie scolaire', items: [
     ['/appel', "Faire l'appel", 'list-checks', ['enseignant']],
     ['/absences', 'Absences', 'user-x', ['admin', 'enseignant', 'parent', 'eleve']],
+    ['/retards', 'Retards', 'clock', ['admin', 'enseignant', 'parent', 'eleve']],
+    ['/absences-enseignants', 'Absences enseignants', 'user-x', ['admin', 'enseignant']],
     ['/devoirs', 'Devoirs', 'pencil', ['admin', 'enseignant', 'parent', 'eleve']],
   ] },
   { title: 'Communication', items: [
     ['/messagerie', 'Messagerie', 'message', TOUS],
     ['/annonces', 'Annonces', 'megaphone', TOUS],
+    ['/reclamations', 'Réclamations', 'inbox', ['admin', 'parent']],
   ] },
   { title: 'Finances', items: [
     ['/tarifs', 'Tarifs', 'tag', ['admin', 'comptable']],
@@ -196,6 +200,9 @@ export default function App() {
       <Route path="/" element={guard(<Dashboard />)} />
       <Route path="/statistiques" element={guardRoles(['admin'], <StatsEcole />)} />
       <Route path="/decisionnel" element={guardRoles(['admin'], <Decisionnel />)} />
+      <Route path="/retards" element={guardRoles(['admin', 'enseignant', 'parent', 'eleve'], <Retards />)} />
+      <Route path="/absences-enseignants" element={guardRoles(['admin', 'enseignant'], <AbsencesEnseignants />)} />
+      <Route path="/reclamations" element={guardRoles(['admin', 'parent'], <Reclamations />)} />
       <Route path="/eleves" element={guard(<P.Eleves />)} />
       <Route path="/preinscriptions" element={guard(<P.Preinscriptions />)} />
       <Route path="/classes" element={guard(<P.Classes />)} />

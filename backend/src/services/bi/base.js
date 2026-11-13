@@ -34,6 +34,9 @@ const SEUILS = {
   salle_sous_utilisee: 30, salle_saturee: 90, // % d'occupation
   lecture_faible: 50, // % de messages lus
   reponse_parent_jours: 3,
+  retards_recurrents: 3, // retards d'arrivée dans l'année
+  reclamation_jours: 7, // une réclamation non résolue depuis plus de 7 jours est « en retard »
+  absences_enseignant_recurrentes: 3,
 };
 
 // Mois (YYYY-MM) de l'année scolaire « 2026-2027 » : septembre … août
@@ -132,6 +135,13 @@ const absences = (ctx, annee = ctx.annee) => memo(ctx, `abs:${annee}`, async () 
   return new Map(l.map((x) => [x.eleve_id, { nb: n(x.nb), jours: n(x.jours), nj: n(x.nj), jours_nj: n(x.jours_nj), justifiees: n(x.nj_just), derniere: x.derniere }]));
 });
 
+// Retards d'arrivée des élèves (année en cours)
+const retards = (ctx, annee = ctx.annee) => memo(ctx, `retards:${annee}`, async () => {
+  const l = await rows(`SELECT eleve_id, COUNT(*) nb, COALESCE(SUM(minutes),0) minutes, COUNT(*) FILTER (WHERE justifie) just, MAX(date_retard) dernier
+    FROM retards WHERE deleted_at IS NULL AND annee_scolaire=$1 GROUP BY 1`, [annee]);
+  return new Map(l.map((x) => [x.eleve_id, { nb: n(x.nb), minutes: n(x.minutes), justifies: n(x.just), dernier: x.dernier }]));
+});
+
 const parents = (ctx) => memo(ctx, 'parents', async () => {
   const l = await rows(`SELECT ep.eleve_id, u.id, u.nom, u.prenom, u.telephone, u.email FROM eleve_parents ep JOIN users u ON u.id=ep.parent_id WHERE u.deleted_at IS NULL AND u.actif`);
   const m = new Map(); for (const p of l) (m.get(p.eleve_id) || m.set(p.eleve_id, []).get(p.eleve_id)).push({ id: p.id, nom: `${p.prenom} ${p.nom}`, telephone: p.telephone, email: p.email });
@@ -162,14 +172,14 @@ const soldes = (ctx) => memo(ctx, 'soldes', async () => {
 // ---------- Détection des risques (Early Warning System) : règles simples, additives et explicables ----------
 const REGLES_RISQUE = [
   'Échec : moyenne annuelle < 8 → +45 pts ; < 10 → +30 ; < 11 → +10. Au moins 3 matières < 8 → +10. Baisse ≥ 2 points entre le premier et le dernier trimestre → +15.',
-  "Absences : ≥ 5 absences non justifiées → +25 ; ≥ 3 → +15. Au moins 8 jours d'absence au total → +10.",
+  "Assiduité : ≥ 5 absences non justifiées → +25 ; ≥ 3 → +15. Au moins 8 jours d'absence au total → +10. Retards d'arrivée : ≥ 10 → +10 ; ≥ 5 → +5.",
   'Impayés : reste dû ≥ 75 % du montant → +25 ; ≥ 50 % → +15 ; ≥ 25 % → +5. Retard de plus de 60 jours sur une échéance → +5.',
   'Double risque : absences répétées ET (moyenne < 10 ou baisse ≥ 1,5 point) → +15.',
   'Niveau de risque : score ≥ 60 = élevé, ≥ 35 = moyen, ≥ 20 = faible (maximum 100).',
   'Type « abandon » : absences répétées combinées à des impayés importants ou à un risque d’échec.',
 ];
 const risques = (ctx) => memo(ctx, 'risques', async () => {
-  const [E, N, Ab, S, P] = await Promise.all([elevesActifs(ctx), notes(ctx), absences(ctx), soldes(ctx), parents(ctx)]);
+  const [E, N, Ab, S, P, Rt] = await Promise.all([elevesActifs(ctx), notes(ctx), absences(ctx), soldes(ctx), parents(ctx), retards(ctx)]);
   const out = [];
   for (const e of E) {
     const nt = N.eleves.get(e.id); const ab = Ab.get(e.id) || { nb: 0, jours: 0, nj: 0, jours_nj: 0 }; const so = S.get(e.id) || { du: 0, paye: 0, solde: 0, ratio: 0, jours_retard: null };
@@ -183,6 +193,8 @@ const risques = (ctx) => memo(ctx, 'risques', async () => {
     }
     if (ab.nj >= 5) { pa += 25; raisons.push(`${ab.nj} absences non justifiées`); } else if (ab.nj >= SEUILS.absences_repetitives) { pa += 15; raisons.push(`${ab.nj} absences non justifiées`); }
     if (ab.jours >= 8) { pa += 10; raisons.push(`${r1(ab.jours)} jours d'absence au total`); }
+    const rt = Rt.get(e.id) || { nb: 0, minutes: 0 };
+    if (rt.nb >= 10) { pa += 10; raisons.push(`${rt.nb} retards d'arrivée`); } else if (rt.nb >= 5) { pa += 5; raisons.push(`${rt.nb} retards d'arrivée`); }
     if (so.solde > 0) {
       if (so.ratio >= 0.75) pi += 25; else if (so.ratio >= 0.5) pi += 15; else if (so.ratio >= 0.25) pi += 5;
       if (pi >= 15) raisons.push(`Reste à payer : ${so.solde.toFixed(2)} TND (${Math.round(so.ratio * 100)} %)`);
@@ -199,7 +211,7 @@ const risques = (ctx) => memo(ctx, 'risques', async () => {
     out.push({
       id: e.id, nom: `${e.prenom} ${e.nom}`, classe: e.classe, classe_id: e.classe_id, score,
       niveau: score >= 60 ? 'eleve' : score >= 35 ? 'moyen' : 'faible', types: [...types], raisons,
-      moyenne: moy === null ? null : r1(moy), evolution: delta === null ? null : r1(delta), absences_nj: ab.nj, absences_jours: r1(ab.jours),
+      moyenne: moy === null ? null : r1(moy), evolution: delta === null ? null : r1(delta), absences_nj: ab.nj, absences_jours: r1(ab.jours), retards: rt.nb,
       solde: so.solde, parents: (P.get(e.id) || []).slice(0, 2),
     });
   }
@@ -242,6 +254,6 @@ const previsionEffectifs = (ctx) => memo(ctx, 'prevision', async () => {
 
 module.exports = {
   n, r1, r2, pct, moyenne, debut, anneeDe, rows, nomClasse, ordreNiveau, SEUILS, REGLES_RISQUE, moisAnnee, moisLabel, joursOuvres,
-  regression, prevoir, correlation, contexte, memo, anneesDisponibles, elevesActifs, classesAnnee, notes, absences, parents, soldes, risques,
+  regression, prevoir, correlation, contexte, memo, anneesDisponibles, elevesActifs, classesAnnee, notes, absences, retards, parents, soldes, risques,
   evolutionInscriptions, renouvellement, previsionEffectifs,
 };

@@ -18,7 +18,8 @@ const iso = (d) => d.toISOString().slice(0, 10);
 const jourOuvre = (d) => { const x = new Date(d); while (x.getUTCDay() === 0) x.setUTCDate(x.getUTCDate() + 1); return x; };
 
 async function enrichir(school) {
-  return txa((cl) => enrichirTx(cl, school)); // tout ou rien : une erreur annule l'école entière, la commande peut être relancée
+  // tout ou rien : une erreur annule l'école entière, la commande peut être relancée (chaque partie a son propre repère « déjà fait »)
+  return txa(async (cl) => { const a = await enrichirTx(cl, school); const b = await suiviTx(cl, school); return a || b ? { ...a, ...b } : null; });
 }
 async function enrichirTx(cl, school) {
   const qa = (text, p) => cl.query(text, p);
@@ -95,6 +96,67 @@ async function enrichirTx(cl, school) {
       const p = parents[i % parents.length]; const sent = new Date(Date.now() - ilYa * 86400000);
       const m = await ins('messages', { sender_id: p, objet, corps: 'Bonjour, pouvez-vous me répondre ? Merci.', statut: 'envoye', sent_at: sent.toISOString() }); if (!m) continue; bilan.messages++;
       if (repondue) await ins('messages', { sender_id: admin.id, thread_id: m, objet: `Re: ${objet}`, corps: 'Bonjour, nous revenons vers vous rapidement.', statut: 'envoye', sent_at: new Date(sent.getTime() + 20 * 3600000).toISOString() });
+    }
+  }
+  return bilan;
+}
+
+// Retards d'arrivée, absences / remplacements des enseignants et réclamations des parents (déjà fait si l'école a des absences d'enseignants)
+async function suiviTx(cl, school) {
+  const qa = (text, p) => cl.query(text, p);
+  const s = school.id; const R = rng(s * 104729 + 7); const pick = (t) => t[Math.floor(R() * t.length)];
+  const ins = async (table, o) => {
+    const k = Object.keys(o);
+    const r = await qa(`INSERT INTO ${table}(${k.join(',')},school_id) VALUES (${k.map((_, i) => `$${i + 1}`).join(',')},$${k.length + 1}) ON CONFLICT DO NOTHING RETURNING id`, [...k.map((c) => o[c]), s]);
+    return r.rows[0]?.id;
+  };
+  if ((await qa('SELECT 1 FROM absences_enseignants WHERE school_id=$1 LIMIT 1', [s])).rowCount) return null;
+  const eleves = (await qa("SELECT id FROM eleves WHERE school_id=$1 AND deleted_at IS NULL AND statut='actif' AND classe_id IS NOT NULL ORDER BY id", [s])).rows;
+  const profs = (await qa("SELECT id FROM users WHERE school_id=$1 AND role='enseignant' AND deleted_at IS NULL AND actif ORDER BY id", [s])).rows.map((x) => x.id);
+  const admin = (await qa("SELECT id FROM users WHERE school_id=$1 AND role='admin' AND deleted_at IS NULL ORDER BY id LIMIT 1", [s])).rows[0];
+  if (!eleves.length || !profs.length) return null;
+  const bilan = { retards: 0, absences_enseignants: 0, reclamations: 0 };
+  const debut = Date.UTC(START, 8, 8); const hier = new Date(`${today}T12:00:00Z`).getTime() - 86400000;
+  const datePassee = () => iso(jourOuvre(new Date(debut + R() * Math.max(1, hier - debut))));
+  const dans = (n) => iso(jourOuvre(new Date(new Date(`${today}T12:00:00Z`).getTime() + n * 86400000)));
+
+  // 1) Retards d'arrivée : un tiers des élèves en ont 1 à 3, quelques retardataires fréquents (5 à 8) ; jamais un jour où l'élève est absent toute la journée
+  const absJournee = new Set((await qa("SELECT eleve_id||'|'||date_absence::text k FROM absences WHERE school_id=$1 AND periode='journee' AND deleted_at IS NULL", [s])).rows.map((x) => x.k));
+  const frequents = new Set(eleves.filter(() => R() < 0.08).map((e) => e.id)); for (const e of eleves.slice(0, 2)) frequents.add(e.id);
+  for (const e of eleves) {
+    const nb = frequents.has(e.id) ? 5 + Math.floor(R() * 4) : (R() < 0.35 ? 1 + Math.floor(R() * 3) : 0);
+    for (let k = 0; k < nb; k++) {
+      const d = datePassee(); if (d >= today || absJournee.has(`${e.id}|${d}`)) continue;
+      if (await ins('retards', { eleve_id: e.id, date_retard: d, minutes: 5 + 5 * Math.floor(R() * 5), motif: R() < 0.4 ? pick(['Problème de transport', 'Rendez-vous médical', 'Panne de voiture']) : null, justifie: R() < 0.2, annee_scolaire: CUR })) bilan.retards++;
+    }
+  }
+
+  // 2) Absences d'enseignants : un enseignant souvent absent, des remplaçants pour environ 60 % des absences passées, et des absences à venir
+  const prises = new Set(); const remplacants = new Set(); // 'enseignant|date' déjà absent ; 'enseignant|date' déjà désigné comme remplaçant
+  const creer = async (p, d, remplacantVoulu) => {
+    if (prises.has(`${p}|${d}`) || remplacants.has(`${p}|${d}`)) return;
+    const cand = profs.filter((x) => x !== p && !prises.has(`${x}|${d}`));
+    const remp = remplacantVoulu && cand.length ? pick(cand) : null;
+    if (await ins('absences_enseignants', { enseignant_id: p, date_absence: d, periode: pick(['journee', 'journee', 'matin', 'apres_midi']), motif: pick(['Maladie', 'Formation', 'Raison familiale']), justifiee: R() < 0.7, remplacant_id: remp, annee_scolaire: CUR })) {
+      prises.add(`${p}|${d}`); if (remp) remplacants.add(`${remp}|${d}`); bilan.absences_enseignants++;
+    }
+  };
+  const passees = Math.min(8, profs.length * 2 + 1);
+  for (let i = 0; i < passees; i++) await creer(i < 3 ? profs[0] : pick(profs), datePassee(), R() < 0.6);
+  await creer(profs[Math.min(1, profs.length - 1)], dans(3), true); await creer(profs[Math.min(2, profs.length - 1)], dans(6), false);
+
+  // 3) Réclamations de parents : ouvertes (dont une en retard), en cours, résolues (avec délai) et une rejetée
+  const liens = (await qa("SELECT ep.parent_id, MIN(ep.eleve_id) eleve_id FROM eleve_parents ep JOIN users u ON u.id=ep.parent_id WHERE u.school_id=$1 AND u.role='parent' AND u.deleted_at IS NULL GROUP BY ep.parent_id ORDER BY ep.parent_id", [s])).rows;
+  if (admin && liens.length) {
+    const plan = [
+      ['pedagogique', 'Notes de mon enfant', 'ouverte', 10, null], ['vie_scolaire', 'Problème à la cantine', 'ouverte', 3, null], ['administratif', 'Certificat de scolarité', 'en_cours', 5, null],
+      ['financier', 'Erreur sur la facture', 'resolue', 12, 4], ['pedagogique', 'Demande de rendez-vous avec l’enseignant', 'resolue', 7, 2], ['vie_scolaire', 'Transport scolaire', 'rejetee', 15, 3],
+    ];
+    for (const [i, [categorie, objet, statut, age, delai]] of plan.entries()) {
+      const l = liens[i % liens.length]; const cree = new Date(Date.now() - age * 86400000); const close = delai ? new Date(cree.getTime() + delai * 86400000) : null;
+      if (await ins('reclamations', { parent_id: l.parent_id, eleve_id: l.eleve_id, categorie, objet, description: `${objet} : je souhaiterais des explications et une solution rapide. Merci de votre aide.`, statut,
+        reponse: close ? (statut === 'rejetee' ? 'Ce service n’est pas assuré par l’école cette année.' : 'Le problème a été examiné et corrigé. Merci pour votre signalement.') : null, traite_par: close || statut === 'en_cours' ? admin.id : null,
+        annee_scolaire: CUR, resolved_at: close ? close.toISOString() : null, updated_at: close ? close.toISOString() : null, created_at: cree.toISOString() })) bilan.reclamations++;
     }
   }
   return bilan;

@@ -5,6 +5,7 @@ import Icon from '../components/Icon.jsx';
 import { Alert, Avatar, PageHeader, Pill, Spinner } from '../components/ui.jsx';
 
 const MOTIF_MAX = 200;
+const MINUTES_DEFAUT = 10;
 const RETRO_JOURS_ENSEIGNANT = 30;
 const PERIODES = [{ value: 'journee', label: 'Journée' }, { value: 'matin', label: 'Matin' }, { value: 'apres_midi', label: 'Après-midi' }];
 const pad = (n) => String(n).padStart(2, '0');
@@ -52,6 +53,7 @@ export default function Appel() {
       const e = Object.fromEntries(d.eleves.map((x) => [x.eleve_id, {
         absent: !!x.absence_id, periode: x.periode || 'journee', motif: x.motif || '',
         verrou: !!x.justifiee && !admin, justifiee: !!x.justifiee,
+        retard: !!x.retard_id, minutes: x.retard_minutes || MINUTES_DEFAUT, retardMotif: x.retard_motif || '', retardVerrou: !!x.retard_justifie && !admin, retardJustifie: !!x.retard_justifie,
       }]));
       setEleves(d.eleves); setEtat(e); setInitial(JSON.stringify(e));
     }).catch((e) => { setErr(e.message); setEleves([]); setEtat({}); }).finally(() => setLoading(false));
@@ -59,17 +61,22 @@ export default function Appel() {
   useEffect(() => { load(); }, [classeId, date, dateErr]);
 
   const set = (id, patch) => setEtat((s) => ({ ...s, [id]: { ...s[id], ...patch } }));
-  const toggle = (id) => { setOk(''); if (!etat[id].verrou) set(id, { absent: !etat[id].absent }); };
+  // Un élève noté absent n'est pas « en retard » : on retire son retard en le marquant absent
+  const toggle = (id) => { setOk(''); if (!etat[id].verrou) set(id, { absent: !etat[id].absent, ...(!etat[id].absent && !etat[id].retardVerrou ? { retard: false } : {}) }); };
   const tousPresents = () => { setOk(''); setEtat((s) => Object.fromEntries(Object.entries(s).map(([id, v]) => [id, v.verrou ? v : { ...v, absent: false, motif: '' }]))); };
 
   const nbAbsents = Object.values(etat).filter((v) => v.absent).length;
+  const nbRetards = Object.values(etat).filter((v) => v.retard && !v.absent).length;
   const save = async () => {
     setErr(''); setOk('');
     const absents = Object.entries(etat).filter(([, v]) => v.absent).map(([id, v]) => ({ eleve_id: Number(id), periode: v.periode, motif: v.motif.trim() }));
+    const retards = Object.entries(etat).filter(([, v]) => v.retard && !v.absent && !v.retardVerrou).map(([id, v]) => ({ eleve_id: Number(id), minutes: Number(v.minutes), motif: v.retardMotif.trim() }));
+    const mauvais = retards.find((r) => !Number.isInteger(r.minutes) || r.minutes < 1 || r.minutes > 240);
+    if (mauvais) { const e = eleves.find((x) => x.eleve_id === mauvais.eleve_id); setErr(`Retard de ${e.prenom} ${e.nom} : indiquez un nombre entier de minutes entre 1 et 240.`); return; }
     setSaving(true);
     try {
-      const r = await api('/absences/appel', { method: 'PUT', body: { classe_id: Number(classeId), date_absence: date, absents } });
-      setOk(`Appel du ${fmtDate(date)} enregistré : ${r.absents} absent(s)${r.conserves ? ` (${r.conserves} absence(s) justifiée(s) conservée(s))` : ''}.`);
+      const r = await api('/absences/appel', { method: 'PUT', body: { classe_id: Number(classeId), date_absence: date, absents, retards } });
+      setOk(`Appel du ${fmtDate(date)} enregistré : ${r.absents} absent(s), ${nbRetards} en retard${r.conserves ? ` (${r.conserves} élément(s) justifié(s) conservé(s))` : ''}.`);
       load();
     } catch (e) { setErr(e.message); } finally { setSaving(false); }
   };
@@ -97,7 +104,7 @@ export default function Appel() {
       {classeId && !dateErr && (
         <>
           <div className="row between" style={{ margin: '.5rem 0 .75rem' }}>
-            <div className="counter" aria-live="polite"><span><strong>{eleves.length - nbAbsents}</strong> présent(s)</span><span><strong>{nbAbsents}</strong> absent(s)</span><span className="muted">sur {eleves.length}</span></div>
+            <div className="counter" aria-live="polite"><span><strong>{eleves.length - nbAbsents}</strong> présent(s)</span><span><strong>{nbAbsents}</strong> absent(s)</span><span><strong>{nbRetards}</strong> en retard</span><span className="muted">sur {eleves.length}</span></div>
             <button type="button" className="btn sec sm" onClick={tousPresents} disabled={loading || !nbAbsents}><Icon name="check" size={14} />Tous présents</button>
           </div>
           {loading ? <Spinner label="Chargement des élèves…" /> : (
@@ -112,6 +119,22 @@ export default function Appel() {
                       <span className="appel-name">{e.nom} {e.prenom}</span>
                       <span className="appel-state">{v.justifiee && <Pill kind="ok">Justifiée</Pill>}<Pill kind={v.absent ? 'bad' : 'ok'}>{v.absent ? 'Absent' : 'Présent'}</Pill></span>
                     </button>
+                    {!v.absent && (
+                      <div className="appel-detail">
+                        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem', margin: 0 }}>
+                          <input type="checkbox" checked={v.retard} disabled={v.retardVerrou} onChange={(x) => { setOk(''); set(e.eleve_id, { retard: x.target.checked }); }} />
+                          En retard
+                        </label>
+                        {v.retard && (
+                          <>
+                            <input type="number" min={1} max={240} step={1} aria-label={`Minutes de retard de ${e.prenom} ${e.nom}`} value={v.minutes} disabled={v.retardVerrou} onChange={(x) => set(e.eleve_id, { minutes: x.target.value })} style={{ maxWidth: 90 }} />
+                            <span className="muted small">min</span>
+                            <input aria-label={`Motif du retard de ${e.prenom} ${e.nom} (facultatif)`} placeholder="Motif (facultatif)" maxLength={MOTIF_MAX} value={v.retardMotif} disabled={v.retardVerrou} onChange={(x) => set(e.eleve_id, { retardMotif: x.target.value })} />
+                            {v.retardJustifie && <Pill kind="ok">Justifié</Pill>}
+                          </>
+                        )}
+                      </div>
+                    )}
                     {v.absent && (
                       <div className="appel-detail">
                         <select aria-label={`Période d'absence de ${e.prenom} ${e.nom}`} value={v.periode} disabled={v.verrou} onChange={(x) => set(e.eleve_id, { periode: x.target.value })} style={{ maxWidth: 170 }}>

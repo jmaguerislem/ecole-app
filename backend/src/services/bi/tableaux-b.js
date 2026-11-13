@@ -4,6 +4,7 @@ const { AUGMENTATION } = require('../tarifs');
 const B = require('./base');
 const A = require('./tableaux-a');
 const { n, r1, r2, pct, moyenne, rows, SEUILS } = B;
+const { CATEGORIES } = require('../suivi');
 const JOURS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
 
 // ---------- 6. Inscriptions et fidélisation ----------
@@ -36,7 +37,7 @@ async function inscriptions(ctx) {
 // ---------- 7. Communication avec les parents ----------
 async function communication(ctx) {
   const bornes = V.bornesAnnee(ctx.annee); const d1 = bornes.debut; const d2 = `${bornes.fin}T23:59:59`;
-  const [tot, mensuel, parParent, notif, demandes, nbParents, R] = await Promise.all([
+  const [tot, mensuel, parParent, notif, demandes, nbParents, R, RC] = await Promise.all([
     rows(`SELECT COUNT(DISTINCT m.id) messages, COUNT(*) destinataires, COUNT(mr.read_at) lus FROM messages m JOIN message_recipients mr ON mr.message_id=m.id JOIN users u ON u.id=mr.user_id AND u.role='parent'
           WHERE m.statut='envoye' AND m.sent_at >= $1 AND m.sent_at <= $2 AND m.sender_id <> mr.user_id`, [d1, d2]),
     rows(`SELECT to_char(m.sent_at,'YYYY-MM') mois, COUNT(DISTINCT m.id) messages, COUNT(*) destinataires, COUNT(mr.read_at) lus FROM messages m JOIN message_recipients mr ON mr.message_id=m.id JOIN users u ON u.id=mr.user_id AND u.role='parent'
@@ -49,6 +50,7 @@ async function communication(ctx) {
           FROM messages m JOIN users u ON u.id=m.sender_id AND u.role='parent' WHERE m.statut='envoye' AND m.thread_id IS NULL AND m.sent_at >= $1 AND m.sent_at <= $2 ORDER BY m.sent_at DESC`, [d1, d2]),
     rows("SELECT COUNT(*) nb FROM users WHERE role='parent' AND deleted_at IS NULL AND actif"),
     B.risques(ctx),
+    rows(`SELECT r.id, r.objet, r.categorie, r.statut, r.created_at, r.resolved_at, u.prenom||' '||u.nom parent FROM reclamations r JOIN users u ON u.id=r.parent_id WHERE r.deleted_at IS NULL AND r.annee_scolaire=$1`, [ctx.annee]),
   ]);
   const P = parParent.map((p) => ({ id: p.id, nom: `${p.prenom} ${p.nom}`, telephone: p.telephone, recus: n(p.recus), lus: n(p.lus), taux: pct(n(p.lus), n(p.recus)), dernier: p.dernier }));
   const jamais = P.filter((p) => p.recus >= 1 && p.lus === 0).sort((a, b) => b.recus - a.recus);
@@ -60,6 +62,15 @@ async function communication(ctx) {
       attente.push({ id: d.id, objet: d.objet, parent: `${d.prenom} ${d.nom}`, date: d.sent_at, jours, en_retard: jours > SEUILS.reponse_parent_jours });
     }
   }
+  // Réclamations des parents : statut, catégories, délai de traitement
+  const age = (d) => Math.floor((now - new Date(d)) / 86400000);
+  const ouvertes = RC.filter((x) => x.statut === 'ouverte' || x.statut === 'en_cours');
+  const delaisRec = RC.filter((x) => x.resolved_at).map((x) => (new Date(x.resolved_at) - new Date(x.created_at)) / 86400000);
+  const reclamations = {
+    par_statut: ['ouverte', 'en_cours', 'resolue', 'rejetee'].map((st) => ({ statut: st, nombre: RC.filter((x) => x.statut === st).length })),
+    par_categorie: Object.keys(CATEGORIES).map((k) => ({ categorie: k, label: CATEGORIES[k], nombre: RC.filter((x) => x.categorie === k).length })).filter((x) => x.nombre > 0),
+    en_attente: ouvertes.map((x) => ({ id: x.id, objet: x.objet, parent: x.parent, categorie: CATEGORIES[x.categorie] || x.categorie, statut: x.statut, jours: age(x.created_at), en_retard: age(x.created_at) > SEUILS.reclamation_jours })).sort((a, b) => b.jours - a.jours).slice(0, 20),
+  };
   const M = new Map(mensuel.map((x) => [x.mois, x]));
   const parMois = B.moisAnnee(ctx.annee).map((m) => ({ mois: m, label: B.moisLabel(m), messages: n(M.get(m)?.messages), destinataires: n(M.get(m)?.destinataires), lus: n(M.get(m)?.lus), taux_lecture: pct(n(M.get(m)?.lus), n(M.get(m)?.destinataires)) }));
   const lectureP = new Map(P.map((p) => [p.id, p]));
@@ -70,11 +81,13 @@ async function communication(ctx) {
   return {
     kpis: { messages_envoyes: n(tot[0].messages), destinataires: n(tot[0].destinataires), taux_lecture: pct(n(tot[0].lus), n(tot[0].destinataires)), parents: n(nbParents[0].nb), parents_sans_lecture: jamais.length, parents_lecture_faible: faibles.length,
       taux_lecture_notifications: pct(n(notif[0].lues), n(notif[0].total)), notifications: n(notif[0].total), demandes_parents: demandes.length, demandes_sans_reponse: attente.length, demandes_en_retard: attente.filter((a) => a.en_retard).length,
-      delai_reponse_heures: delais.length ? r1(moyenne(delais)) : null, parents_a_renforcer: renfort.length },
-    par_mois: parMois, parents_sans_lecture: jamais.slice(0, 20), parents_lecture_faible: faibles.slice(0, 20), demandes_en_attente: attente.slice(0, 20), suivi_renforce: renfort,
+      delai_reponse_heures: delais.length ? r1(moyenne(delais)) : null, parents_a_renforcer: renfort.length,
+      reclamations: RC.length, reclamations_ouvertes: ouvertes.length, reclamations_en_retard: ouvertes.filter((x) => age(x.created_at) > SEUILS.reclamation_jours).length, reclamations_resolues: RC.filter((x) => x.statut === 'resolue').length,
+      taux_resolution: pct(RC.filter((x) => x.statut === 'resolue').length, RC.length), delai_traitement_jours: delaisRec.length ? r1(moyenne(delaisRec)) : null },
+    par_mois: parMois, reclamations, parents_sans_lecture: jamais.slice(0, 20), parents_lecture_faible: faibles.slice(0, 20), demandes_en_attente: attente.slice(0, 20), suivi_renforce: renfort,
     regles: [`Parent « ne consulte pas » : au moins 1 message reçu et aucun lu ; lecture faible : au moins 3 messages et moins de ${SEUILS.lecture_faible} % lus.`, `Demande sans réponse : message d'un parent resté sans réponse du personnel ; en retard au-delà de ${SEUILS.reponse_parent_jours} jours.`,
-      'Suivi parental à renforcer : parent d’un élève à risque moyen ou élevé (tableau « Détection des risques ») qui lit peu ou pas les messages.'],
-    non_suivi: ["Il n'existe pas de module de « réclamations » : les demandes des parents sont les messages qu'ils envoient à l'école."],
+      'Suivi parental à renforcer : parent d’un élève à risque moyen ou élevé (tableau « Détection des risques ») qui lit peu ou pas les messages.',
+      `Réclamations : déposées par les parents (page « Réclamations ») et traitées par la direction ; délai de traitement = du dépôt à la résolution ou au rejet ; en retard au-delà de ${SEUILS.reclamation_jours} jours sans résolution.`],
   };
 }
 
@@ -203,6 +216,12 @@ async function recommandations(ctx) {
   if (r.kpis.risque_eleve) add('haute', 'Risques', `${r.kpis.risque_eleve} élève(s) à risque élevé`, `Dont ${r.kpis.double_risque} cumulant absences répétées et baisse des résultats.`, 'Organiser une réunion de suivi cette semaine (voir « Détection des risques »).');
   if (e.kpis.surcharge) add('moyenne', 'Enseignants', `${e.kpis.surcharge} enseignant(s) en surcharge`, `Charge moyenne : ${e.kpis.charge_moyenne} h/semaine.`, 'Redistribuer des heures vers les enseignants en sous-charge.');
   if (e.kpis.sous_charge) add('info', 'Enseignants', `${e.kpis.sous_charge} enseignant(s) en sous-charge`, 'Moins de 60 % de la charge moyenne.', 'Leur confier des heures de soutien ou de remplacement.');
+  const ae = e.absences.kpis;
+  if (ae.a_pourvoir) add('haute', 'Enseignants', `${ae.a_pourvoir} absence(s) d'enseignant à venir sans remplaçant`, 'Absences déjà déclarées pour les prochains jours.', 'Désigner un remplaçant dans « Absences enseignants ».');
+  if (ae.non_remplacees) add('moyenne', 'Enseignants', `${ae.non_remplacees} absence(s) d'enseignant sans remplaçant`, `${ae.heures_non_assurees} h de cours non assurées.`, 'Prévoir un vivier de remplaçants ou un plan de continuité pédagogique.');
+  if (ae.recurrentes) add('moyenne', 'Enseignants', `${ae.recurrentes} enseignant(s) souvent absent(s)`, `${SEUILS.absences_enseignant_recurrentes} absences ou plus dans l'année.`, 'Faire un point individuel avec les enseignants concernés.');
+  if (a.kpis.retards_recurrents) add('moyenne', 'Absences', `${a.kpis.retards_recurrents} élève(s) souvent en retard`, `${a.kpis.retards} retards d'arrivée cette année (${a.kpis.minutes_retard} min au total).`, 'Échanger avec les familles sur les horaires d\'arrivée.');
+  if (c.kpis.reclamations_en_retard) add('haute', 'Communication', `${c.kpis.reclamations_en_retard} réclamation(s) en attente depuis plus de ${SEUILS.reclamation_jours} jours`, `${c.kpis.reclamations_ouvertes} réclamation(s) non résolue(s) au total.`, 'Répondre aux parents dans « Réclamations ».');
   if (t.kpis.conflits) add('haute', 'Emplois du temps', `${t.kpis.conflits} conflit(s) d'horaire`, 'Deux créneaux se chevauchent pour la même ressource.', 'Corriger les créneaux concernés dans « Emploi du temps ».');
   if (t.kpis.salles_sous_utilisees) add('info', 'Ressources', `${t.kpis.salles_sous_utilisees} salle(s) sous-utilisée(s)`, 'Occupation inférieure à 30 %.', 'Y affecter des activités ou en libérer l’usage.');
   if (c.kpis.taux_lecture !== null && c.kpis.taux_lecture < SEUILS.lecture_faible) add('moyenne', 'Communication', `Messages peu lus : ${c.kpis.taux_lecture} %`, `${c.kpis.parents_sans_lecture} parent(s) n'ont lu aucun message.`, 'Compléter par un appel ou un SMS pour les familles importantes.');

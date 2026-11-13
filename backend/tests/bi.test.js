@@ -28,6 +28,9 @@ const ins = async (schoolId, table, o) => {
 };
 const jour = (mois, j) => `${START}-${String(mois).padStart(2, '0')}-${String(j).padStart(2, '0')}`;
 const ilYa = (jours) => new Date(Date.now() - jours * 86400000).toISOString();
+const lundi = (semainesAvant) => { const d = new Date(Date.now() - semainesAvant * 7 * 86400000); while (d.getUTCDay() !== 1) d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); };
+const plusJours = (iso, n) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const demain = () => { let d = plusJours(new Date().toISOString().slice(0, 10), 2); if (new Date(`${d}T12:00:00Z`).getUTCDay() === 0) d = plusJours(d, 1); return d; };
 
 test.before(async () => {
   await migrate();
@@ -84,6 +87,20 @@ test.before(async () => {
   const m1 = await ins(s, 'messages', { sender_id: adminA, objet: 'Réunion', corps: 'Bonjour', statut: 'envoye', sent_at: ilYa(10) });
   await ins(s, 'message_recipients', { message_id: m1, user_id: X.p1, read_at: null }); await ins(s, 'message_recipients', { message_id: m1, user_id: X.p2, read_at: ilYa(9) });
   await ins(s, 'messages', { sender_id: X.p1, objet: 'Question sur les notes', corps: 'Pouvez-vous me rappeler ?', statut: 'envoye', sent_at: ilYa(5) });
+  // Retards d'arrivée : Deux6 5 fois (10 min), Deux7 une fois (20 min) → 6 retards, 70 minutes, 2 élèves, 1 retardataire récurrent
+  for (const j of [[10, 1], [10, 2], [10, 3], [10, 6], [10, 7]]) await ins(s, 'retards', { eleve_id: X.s6, date_retard: jour(...j), minutes: 10, annee_scolaire: CUR });
+  await ins(s, 'retards', { eleve_id: X.s7, date_retard: jour(10, 8), minutes: 20, justifie: true, annee_scolaire: CUR });
+  // Absences d'enseignants : EnsUn lundi (journée, 4 h de cours) remplacé par EnsDeux ; EnsUn mardi matin (2 h) SANS remplaçant ;
+  // EnsDeux lundi après-midi justifiée (0 h) ; EnsTrois dans 2-3 jours, sans remplaçant (à pourvoir)
+  const l1 = lundi(1); const l2 = lundi(2);
+  await ins(s, 'absences_enseignants', { enseignant_id: ens.e1, date_absence: l1, periode: 'journee', motif: 'Maladie', justifiee: true, remplacant_id: ens.e2, annee_scolaire: CUR });
+  await ins(s, 'absences_enseignants', { enseignant_id: ens.e1, date_absence: plusJours(l2, 1), periode: 'matin', annee_scolaire: CUR });
+  await ins(s, 'absences_enseignants', { enseignant_id: ens.e2, date_absence: l2, periode: 'apres_midi', justifiee: true, annee_scolaire: CUR });
+  await ins(s, 'absences_enseignants', { enseignant_id: ens.e3, date_absence: demain(), periode: 'journee', annee_scolaire: CUR });
+  // Réclamations : P1 ouverte depuis 10 jours (en retard) + en cours depuis 2 jours ; P2 résolue en 4 jours
+  const rec = (parent, eleve, categorie, objet, statut, creeIlYa, resolueIlYa) => ins(s, 'reclamations', { parent_id: parent, eleve_id: eleve, categorie, objet, description: 'Description de la réclamation du parent.', statut,
+    reponse: resolueIlYa ? 'Problème réglé.' : null, traite_par: resolueIlYa ? adminA : null, annee_scolaire: CUR, resolved_at: resolueIlYa ? ilYa(resolueIlYa) : null, created_at: ilYa(creeIlYa) });
+  await rec(X.p1, X.s1, 'pedagogique', 'Notes de mon enfant', 'ouverte', 10); await rec(X.p1, X.s1, 'vie_scolaire', 'Cantine', 'en_cours', 2); await rec(X.p2, X.s2, 'financier', 'Erreur de facture', 'resolue', 6, 2);
   X.parentToken = await login(`p1-a-${stamp}@bi.test`);
 });
 test.after(async () => {
@@ -145,7 +162,10 @@ test('4. absences : taux, répétitives, relation avec les résultats', async ()
   assert.equal(a.repetitives[0].nom, 'Bi Risk'); assert.equal(a.repetitives[0].non_justifiees, 4);
   assert.equal(a.par_mois.reduce((t, m) => t + m.justifiees + m.non_justifiees, 0), 4.5);
   assert.equal(a.relation.eleves, 3); assert.ok(a.relation.correlation < 0, 'plus d’absences ↔ moyenne plus basse');
-  assert.ok(a.non_suivi.length >= 1, 'les retards d’arrivée sont signalés comme non suivis');
+  assert.deepEqual([a.kpis.retards, a.kpis.minutes_retard, a.kpis.eleves_en_retard, a.kpis.retards_recurrents, a.kpis.retard_moyen_minutes], [6, 70, 2, 1, 11.7]);
+  assert.deepEqual([a.retards.recurrents[0].nom, a.retards.recurrents[0].retards, a.retards.recurrents[0].minutes], ['Bi Deux6', 5, 50]);
+  assert.equal(a.retards.par_mois.reduce((t, m) => t + m.retards, 0), 6); assert.equal(a.retards.par_classe.find((c) => c.nom === '2ème année A').retards, 6);
+  assert.equal(a.non_suivi, undefined, 'plus de donnée « non suivie » : les retards d’arrivée sont enregistrés');
 });
 
 test('5. enseignants : charge horaire, surcharge, sous-charge', async () => {
@@ -153,6 +173,14 @@ test('5. enseignants : charge horaire, surcharge, sous-charge', async () => {
   assert.deepEqual([e.kpis.enseignants, e.kpis.heures_totales, e.kpis.charge_moyenne, e.kpis.surcharge, e.kpis.sous_charge, e.kpis.sans_emploi_du_temps], [3, 8, 2.7, 1, 1, 1]);
   assert.deepEqual(e.enseignants.map((x) => [x.nom, x.heures, x.statut]), [['Bi EnsUn', 6, 'surcharge'], ['Bi EnsDeux', 2, 'equilibre'], ['Bi EnsTrois', 0, 'sous_charge']]);
   assert.equal(e.par_jour[0].heures, 6); // lundi : 2 + 2 + 2
+  const ab = e.absences; // 3 absences passées : 1 journée + 2 demi-journées = 2 jours ; 1 absence à venir
+  assert.deepEqual([ab.kpis.absences, ab.kpis.jours, ab.kpis.remplacees, ab.kpis.non_remplacees, ab.kpis.taux_remplacement, ab.kpis.enseignants_concernes, ab.kpis.recurrentes], [3, 2, 1, 2, 33, 2, 0]);
+  assert.deepEqual([ab.kpis.heures_non_assurees, ab.kpis.heures_remplacees, ab.kpis.a_pourvoir, ab.kpis.absences_a_venir], [2, 4, 1, 1]);
+  assert.ok(ab.kpis.taux_absenteisme > 0);
+  const un = ab.par_enseignant.find((x) => x.nom === 'Bi EnsUn'); assert.deepEqual([un.absences, un.jours, un.non_remplacees], [2, 1.5, 1]);
+  const deux = ab.par_enseignant.find((x) => x.nom === 'Bi EnsDeux'); assert.deepEqual([deux.absences, deux.remplacements, deux.heures_remplacees], [1, 1, 4]);
+  assert.equal(ab.non_remplacees.find((x) => x.enseignant === 'Bi EnsUn').heures, 2); assert.equal(ab.a_venir[0].enseignant, 'Bi EnsTrois');
+  assert.equal(e.non_suivi, undefined);
 });
 
 test('6. inscriptions : nouveaux, renouvellement, départs, origine, prévision', async () => {
@@ -168,6 +196,11 @@ test('7. communication : lecture, parents qui ne lisent pas, demandes sans répo
   assert.deepEqual([c.kpis.messages_envoyes, c.kpis.destinataires, c.kpis.taux_lecture, c.kpis.parents_sans_lecture], [1, 2, 50, 1]);
   assert.equal(c.parents_sans_lecture[0].nom, 'Bi ParentUn');
   assert.deepEqual([c.kpis.demandes_parents, c.kpis.demandes_sans_reponse, c.kpis.demandes_en_retard], [1, 1, 1]);
+  assert.deepEqual([c.kpis.reclamations, c.kpis.reclamations_ouvertes, c.kpis.reclamations_en_retard, c.kpis.reclamations_resolues, c.kpis.taux_resolution], [3, 2, 1, 1, 33]);
+  assert.ok(c.kpis.delai_traitement_jours >= 3.9 && c.kpis.delai_traitement_jours <= 4.1, 'résolue en 4 jours');
+  assert.deepEqual(c.reclamations.par_statut.map((x) => x.nombre), [1, 1, 1, 0]); assert.deepEqual(c.reclamations.par_categorie.map((x) => x.categorie).sort(), ['financier', 'pedagogique', 'vie_scolaire']);
+  assert.deepEqual([c.reclamations.en_attente[0].objet, c.reclamations.en_attente[0].en_retard, c.reclamations.en_attente[1].en_retard], ['Notes de mon enfant', true, false]);
+  assert.equal(c.non_suivi, undefined);
   const r = c.suivi_renforce.find((x) => x.eleve === 'Bi Risk'); assert.equal(r.constat, 'Aucun message lu'); assert.equal(r.telephone, '20111222');
 });
 
@@ -202,6 +235,8 @@ test('10. stratégique : prévision, besoins, scénarios, comparaison, recommand
   const cp = s.comparaison.find((c) => c.annee === PREV); assert.deepEqual([cp.moyenne, cp.taux_reussite, cp.encaisse, cp.nouveaux], [13, 100, 400, 4]);
   const titres = s.recommandations.map((r) => r.titre); assert.ok(titres.some((t) => t.includes('1ère année A est surchargée')));
   assert.ok(titres.some((t) => t.startsWith('Recouvrement faible : 25')) && titres.some((t) => t.includes('à risque élevé')) && titres.some((t) => t.includes("conflit(s) d'horaire")));
+  assert.ok(titres.some((t) => t.includes("absence(s) d'enseignant à venir sans remplaçant")) && titres.some((t) => t.includes("absence(s) d'enseignant sans remplaçant")), 'absences d’enseignants');
+  assert.ok(titres.some((t) => t.includes('réclamation(s) en attente depuis plus de 7 jours')) && titres.some((t) => t.includes('élève(s) souvent en retard')));
   assert.equal(s.recommandations[0].priorite, 'haute');
   // simulation : +20 % d'effectifs et paramètres bornés
   const sim = await must(A, 'GET', '/api/bi/simulation?variation=20&frais=10&cout_enseignant=1200');

@@ -126,10 +126,12 @@ async function pedagogique(ctx) {
 
 // ---------- 4. Absences et retards ----------
 async function absencesTableau(ctx) {
-  const [E, Ab, N, classes, mensuel, dev] = await Promise.all([B.elevesActifs(ctx), B.absences(ctx), B.notes(ctx), B.classesAnnee(ctx),
+  const [E, Ab, N, classes, mensuel, dev, Rt, rmois] = await Promise.all([B.elevesActifs(ctx), B.absences(ctx), B.notes(ctx), B.classesAnnee(ctx),
     B.rows(`SELECT to_char(date_absence,'YYYY-MM') m, SUM(CASE periode WHEN 'journee' THEN 1 ELSE 0.5 END) FILTER (WHERE justifiee) j, SUM(CASE periode WHEN 'journee' THEN 1 ELSE 0.5 END) FILTER (WHERE NOT justifiee) nj
        FROM absences WHERE deleted_at IS NULL AND annee_scolaire=$1 GROUP BY 1`, [ctx.annee]),
-    B.rows(`SELECT COUNT(*) FILTER (WHERE d.en_retard) retard, COUNT(*) total FROM depots d JOIN devoirs dv ON dv.id=d.devoir_id WHERE dv.annee_scolaire=$1`, [ctx.annee])]);
+    B.rows(`SELECT COUNT(*) FILTER (WHERE d.en_retard) retard, COUNT(*) total FROM depots d JOIN devoirs dv ON dv.id=d.devoir_id WHERE dv.annee_scolaire=$1`, [ctx.annee]),
+    B.retards(ctx),
+    B.rows("SELECT to_char(date_retard,'YYYY-MM') m, COUNT(*) nb, COALESCE(SUM(minutes),0) minutes FROM retards WHERE deleted_at IS NULL AND annee_scolaire=$1 GROUP BY 1", [ctx.annee])]);
   const bornes = V.bornesAnnee(ctx.annee); const fin = bornes.fin < ctx.aujourdhui ? bornes.fin : ctx.aujourdhui;
   const possibles = bornes.debut > fin ? 0 : B.joursOuvres(bornes.debut, fin);
   const actifs = new Map(E.map((e) => [e.id, e]));
@@ -144,6 +146,14 @@ async function absencesTableau(ctx) {
   const repetitives = lignes.filter((l) => l.nj >= SEUILS.absences_repetitives).sort((a, b) => b.nj - a.nj).map((l) => ({ id: l.id, nom: `${l.e.prenom} ${l.e.nom}`, classe: l.e.classe, non_justifiees: l.nj, jours: r1(l.jours), derniere: l.derniere }));
   const M = new Map(mensuel.map((x) => [x.m, x]));
   const parMois = B.moisAnnee(ctx.annee).map((m) => ({ mois: m, label: B.moisLabel(m), justifiees: r1(n(M.get(m)?.j)), non_justifiees: r1(n(M.get(m)?.nj)) }));
+  // Retards d'arrivée des élèves actifs
+  const rl = [...Rt.entries()].filter(([id]) => actifs.has(id)).map(([id, r]) => ({ id, ...r, e: actifs.get(id) }));
+  const rtot = rl.reduce((t, l) => ({ nb: t.nb + l.nb, minutes: t.minutes + l.minutes }), { nb: 0, minutes: 0 });
+  const retardsRecurrents = rl.filter((l) => l.nb >= SEUILS.retards_recurrents).sort((a, b) => b.nb - a.nb || b.minutes - a.minutes)
+    .map((l) => ({ id: l.id, nom: `${l.e.prenom} ${l.e.nom}`, classe: l.e.classe, retards: l.nb, minutes: l.minutes, dernier: l.dernier }));
+  const RM = new Map(rmois.map((x) => [x.m, x]));
+  const retardsParMois = B.moisAnnee(ctx.annee).map((m) => ({ mois: m, label: B.moisLabel(m), retards: n(RM.get(m)?.nb), minutes: n(RM.get(m)?.minutes) }));
+  const retardsParClasse = classes.map((c) => { const ls = rl.filter((l) => l.e.classe_id === c.id); return { id: c.id, nom: c.nom, effectif: n(c.effectif), retards: ls.reduce((t, l) => t + l.nb, 0), eleves: ls.length, minutes: ls.reduce((t, l) => t + l.minutes, 0) }; }).filter((c) => c.effectif > 0);
   // Lien absences ↔ résultats : tous les élèves actifs notés (ceux sans absence comptent pour 0)
   const notes = E.map((e) => ({ e, nt: N.eleves.get(e.id) })).filter((x) => x.nt && x.nt.moyenne !== null);
   const xs = notes.map((x) => Ab.get(x.e.id)?.jours || 0); const ys = notes.map((x) => x.nt.moyenne); const r = B.correlation(xs, ys);
@@ -153,21 +163,28 @@ async function absencesTableau(ctx) {
     : r <= -0.5 ? 'Lien fort : plus un élève est absent, plus sa moyenne est basse.' : r <= -0.25 ? 'Lien modéré : les élèves très absents ont tendance à avoir de moins bons résultats.' : r < 0.25 ? 'Pas de lien net entre absences et résultats dans cet établissement.' : 'Lien inhabituel (positif) : à vérifier, peu d’absences ou échantillon réduit.';
   return {
     kpis: { jours_absence: r1(tot.jours), nombre_absences: tot.nb, justifiees: tot.justifiees, non_justifiees: tot.nj, taux_absenteisme: taux, eleves_concernes: lignes.length, absences_repetitives: repetitives.length, jours_de_classe: possibles,
-      devoirs_en_retard: n(dev[0].retard), depots_total: n(dev[0].total), taux_devoirs_en_retard: pct(n(dev[0].retard), n(dev[0].total)) },
+      devoirs_en_retard: n(dev[0].retard), depots_total: n(dev[0].total), taux_devoirs_en_retard: pct(n(dev[0].retard), n(dev[0].total)),
+      retards: rtot.nb, minutes_retard: rtot.minutes, eleves_en_retard: rl.length, retard_moyen_minutes: rtot.nb ? r1(rtot.minutes / rtot.nb) : null, retards_recurrents: retardsRecurrents.length },
     par_classe: parClasse, par_eleve: parEleve, repetitives, par_mois: parMois, relation: { correlation: r === null ? null : Math.round(r * 100) / 100, eleves: notes.length, tranches, lecture },
-    non_suivi: ["Les retards d'arrivée en classe ne sont pas enregistrés (seules les absences le sont). Le retard de remise des devoirs est affiché à titre d'indicateur de substitution."],
-    regles: ['Journée entière = 1 jour, demi-journée = 0,5 jour.', `Taux d'absentéisme = jours d'absence ÷ (élèves × jours de classe écoulés, lundi–samedi).`, `Absences répétitives : au moins ${SEUILS.absences_repetitives} absences non justifiées.`],
+    retards: { par_mois: retardsParMois, par_classe: retardsParClasse, recurrents: retardsRecurrents },
+    regles: ['Journée entière = 1 jour, demi-journée = 0,5 jour.', `Retards d'arrivée : saisis à l'appel ou dans la page « Retards » ; élève « retardataire récurrent » à partir de ${SEUILS.retards_recurrents} retards dans l'année.`, `Taux d'absentéisme = jours d'absence ÷ (élèves × jours de classe écoulés, lundi–samedi).`, `Absences répétitives : au moins ${SEUILS.absences_repetitives} absences non justifiées.`],
   };
 }
 
 // ---------- 5. Enseignants ----------
 async function enseignants(ctx) {
-  const [T, aff, cren] = await Promise.all([
+  const [T, aff, cren, absEns] = await Promise.all([
     B.rows("SELECT id, nom, prenom, specialite FROM users WHERE role='enseignant' AND deleted_at IS NULL AND actif ORDER BY nom, prenom"),
     B.rows(`SELECT a.enseignant_id, m.nom matiere, c.niveau, c.id classe_id FROM affectations a JOIN matieres m ON m.id=a.matiere_id JOIN classes c ON c.id=a.classe_id
             WHERE a.deleted_at IS NULL AND a.annee_scolaire=$1`, [ctx.annee]),
     B.rows(`SELECT cr.enseignant_id, cr.jour, m.nom matiere, c.niveau, c.id classe_id, EXTRACT(EPOCH FROM (cr.heure_fin-cr.heure_debut))/3600 h
-            FROM creneaux cr JOIN matieres m ON m.id=cr.matiere_id JOIN classes c ON c.id=cr.classe_id WHERE cr.deleted_at IS NULL AND cr.annee_scolaire=$1`, [ctx.annee])]);
+            FROM creneaux cr JOIN matieres m ON m.id=cr.matiere_id JOIN classes c ON c.id=cr.classe_id WHERE cr.deleted_at IS NULL AND cr.annee_scolaire=$1`, [ctx.annee]),
+    // Absences des enseignants + heures de cours qu'elles font perdre (créneaux de l'enseignant ce jour-là, sur la période absente)
+    B.rows(`SELECT a.id, a.enseignant_id, a.date_absence, a.periode, a.justifiee, a.motif, a.remplacant_id,
+              COALESCE((SELECT SUM(EXTRACT(EPOCH FROM (c.heure_fin-c.heure_debut))/3600) FROM creneaux c
+                        WHERE c.enseignant_id=a.enseignant_id AND c.deleted_at IS NULL AND c.annee_scolaire=a.annee_scolaire AND c.jour=EXTRACT(ISODOW FROM a.date_absence)::int
+                          AND (a.periode='journee' OR (a.periode='matin' AND c.heure_debut < TIME '12:00') OR (a.periode='apres_midi' AND c.heure_debut >= TIME '12:00'))),0) heures
+            FROM absences_enseignants a WHERE a.deleted_at IS NULL AND a.annee_scolaire=$1`, [ctx.annee])]);
   const fiches = T.map((t) => {
     const a = aff.filter((x) => x.enseignant_id === t.id); const c = cren.filter((x) => x.enseignant_id === t.id);
     const heures = c.reduce((s, x) => s + n(x.h), 0);
@@ -180,13 +197,38 @@ async function enseignants(ctx) {
   const mat = compte('matiere'); const niv = compte('niveau');
   const heuresMat = {}; for (const x of cren) heuresMat[x.matiere] = (heuresMat[x.matiere] || 0) + n(x.h);
   const jours = [1, 2, 3, 4, 5, 6].map((j) => ({ jour: j, label: ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'][j - 1], heures: r1(cren.filter((x) => x.jour === j).reduce((s, x) => s + n(x.h), 0)) }));
+  // ----- Absences et remplacements -----
+  const noms = new Map(T.map((t) => [t.id, `${t.prenom} ${t.nom}`]));
+  const poids = (a) => (a.periode === 'journee' ? 1 : 0.5); const today = ctx.aujourdhui;
+  const passees = absEns.filter((a) => a.date_absence <= today); const avenir = absEns.filter((a) => a.date_absence > today);
+  const bornes = V.bornesAnnee(ctx.annee); const fin = bornes.fin < today ? bornes.fin : today;
+  const possibles = bornes.debut > fin ? 0 : B.joursOuvres(bornes.debut, fin);
+  const joursAbsents = passees.reduce((t, a) => t + poids(a), 0);
+  const remplacees = passees.filter((a) => a.remplacant_id); const nonRemplacees = passees.filter((a) => !a.remplacant_id);
+  const heuresPerdues = nonRemplacees.reduce((t, a) => t + n(a.heures), 0); const heuresCouvertes = remplacees.reduce((t, a) => t + n(a.heures), 0);
+  const parEns = fiches.map((f) => {
+    const mes = passees.filter((a) => a.enseignant_id === f.id); const rem = passees.filter((a) => a.remplacant_id === f.id);
+    return { id: f.id, nom: f.nom, absences: mes.length, jours: r1(mes.reduce((t, a) => t + poids(a), 0)), non_justifiees: mes.filter((a) => !a.justifiee).length, non_remplacees: mes.filter((a) => !a.remplacant_id).length,
+      remplacements: rem.length, heures_remplacees: r1(rem.reduce((t, a) => t + n(a.heures), 0)) };
+  });
+  for (const f of fiches) { const x = parEns.find((p) => p.id === f.id); f.absences = x.absences; f.jours_absence = x.jours; f.remplacements = x.remplacements; }
+  const AM = new Map(); for (const a of passees) { const m = String(a.date_absence).slice(0, 7); AM.set(m, (AM.get(m) || 0) + poids(a)); }
+  const absences = {
+    kpis: { absences: passees.length, jours: r1(joursAbsents), taux_absenteisme: fiches.length && possibles ? r1((joursAbsents / (fiches.length * possibles)) * 100) : null, enseignants_concernes: parEns.filter((p) => p.absences > 0).length,
+      recurrentes: parEns.filter((p) => p.absences >= SEUILS.absences_enseignant_recurrentes).length, remplacees: remplacees.length, non_remplacees: nonRemplacees.length, taux_remplacement: pct(remplacees.length, passees.length),
+      heures_non_assurees: r1(heuresPerdues), heures_remplacees: r1(heuresCouvertes), a_pourvoir: avenir.filter((a) => !a.remplacant_id).length, absences_a_venir: avenir.length },
+    par_enseignant: parEns.filter((p) => p.absences > 0 || p.remplacements > 0).sort((a, b) => b.jours - a.jours || b.remplacements - a.remplacements),
+    par_mois: B.moisAnnee(ctx.annee).map((m) => ({ mois: m, label: B.moisLabel(m), jours: r1(AM.get(m) || 0) })),
+    non_remplacees: nonRemplacees.sort((a, b) => String(b.date_absence).localeCompare(String(a.date_absence))).slice(0, 15).map((a) => ({ id: a.id, enseignant: noms.get(a.enseignant_id) || '?', date: a.date_absence, periode: a.periode, motif: a.motif, heures: r1(n(a.heures)), justifiee: a.justifiee })),
+    a_venir: avenir.sort((a, b) => String(a.date_absence).localeCompare(String(b.date_absence))).slice(0, 15).map((a) => ({ id: a.id, enseignant: noms.get(a.enseignant_id) || '?', date: a.date_absence, periode: a.periode, remplacant: a.remplacant_id ? noms.get(a.remplacant_id) || '?' : null, heures: r1(n(a.heures)) })),
+  };
   return {
+    absences,
     kpis: { enseignants: fiches.length, heures_totales: r1(fiches.reduce((s, f) => s + f.heures, 0)), charge_moyenne: r1(charge), surcharge: fiches.filter((f) => f.statut === 'surcharge').length, sous_charge: fiches.filter((f) => f.statut === 'sous_charge').length, sans_emploi_du_temps: fiches.filter((f) => f.heures === 0).length },
     enseignants: fiches.sort((a, b) => b.heures - a.heures),
     par_matiere: [...mat.entries()].map(([nom, s]) => ({ nom, enseignants: s.size, heures: r1(heuresMat[nom] || 0) })).sort((a, b) => b.heures - a.heures || b.enseignants - a.enseignants),
     par_niveau: V.NIVEAUX.filter((nv) => niv.has(nv)).map((nv) => ({ niveau: nv, enseignants: niv.get(nv).size })), par_jour: jours,
-    non_suivi: ["Les absences des enseignants et leurs remplacements ne sont pas enregistrés dans l'application : ces deux indicateurs ne peuvent pas être calculés."],
-    regles: ['Charge horaire = somme des durées des créneaux de l’emploi du temps (heures par semaine).', `Surcharge : plus de ${Math.round(SEUILS.surcharge_enseignant * 100)} % de la charge moyenne ; sous-charge : moins de ${Math.round(SEUILS.sous_charge_enseignant * 100)} %.`],
+    regles: ['Charge horaire = somme des durées des créneaux de l’emploi du temps (heures par semaine).', 'Absences des enseignants : saisies par la direction (page « Absences enseignants »). Heures non assurées = heures de cours de l’enseignant absent (emploi du temps du jour concerné) sans remplaçant.', `Taux d'absentéisme = jours d'absence passés ÷ (enseignants × jours de classe écoulés). Absences récurrentes : ${SEUILS.absences_enseignant_recurrentes} ou plus dans l'année.`, `Surcharge : plus de ${Math.round(SEUILS.surcharge_enseignant * 100)} % de la charge moyenne ; sous-charge : moins de ${Math.round(SEUILS.sous_charge_enseignant * 100)} %.`],
   };
 }
 

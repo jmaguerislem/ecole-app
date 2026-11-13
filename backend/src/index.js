@@ -20,6 +20,7 @@ const saas = require('./routes/saas');
 const demo = require('./routes/demo');
 const stats = require('./routes/stats');
 const bi = require('./routes/bi');
+const suivi = require('./routes/suivi');
 const A = require('./services/absences');
 const { listerEcoles } = require('./services/ecoles');
 
@@ -59,6 +60,9 @@ app.use('/api/tarifs', E.tarifs);
 app.use('/api/evaluations', E.evaluations);
 app.use('/api/absences/appel', auth, appel);
 app.use('/api/absences', E.absences);
+app.use('/api/retards', suivi.retards);
+app.use('/api/absences-enseignants', suivi.absencesEnseignants);
+app.use('/api/reclamations', suivi.reclamations);
 app.put('/api/absences/:id(\\d+)/justifier', auth, allow('parent'), ah(async (req, res) => {
   const a = (await q('SELECT * FROM absences WHERE id=$1 AND deleted_at IS NULL', [req.params.id])).rows[0];
   if (!a || !(await eleveIdsOf(req.user)).includes(a.eleve_id)) throw new HttpError(404, 'Absence introuvable');

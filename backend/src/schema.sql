@@ -420,3 +420,56 @@ CREATE TABLE IF NOT EXISTS demo_accounts (
   user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   PRIMARY KEY (groupe, role)
 );
+
+-- ===== Suivi : retards d'arrivée, absences/remplacements des enseignants, réclamations des parents =====
+-- Retard d'arrivée d'un élève (saisi à l'appel ou depuis la page « Retards ») : un seul par élève et par jour
+CREATE TABLE IF NOT EXISTS retards (
+  id SERIAL PRIMARY KEY,
+  eleve_id INT NOT NULL REFERENCES eleves(id),
+  date_retard DATE NOT NULL,
+  minutes SMALLINT NOT NULL DEFAULT 10 CHECK (minutes BETWEEN 1 AND 240),
+  motif TEXT,
+  justifie BOOLEAN NOT NULL DEFAULT FALSE,
+  annee_scolaire TEXT NOT NULL,
+  deleted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_retards_jour ON retards(eleve_id, date_retard) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_retards_date ON retards(date_retard);
+
+-- Absence d'un enseignant et son remplacement éventuel (remplaçant = un autre enseignant de l'école)
+CREATE TABLE IF NOT EXISTS absences_enseignants (
+  id SERIAL PRIMARY KEY,
+  enseignant_id INT NOT NULL REFERENCES users(id),
+  date_absence DATE NOT NULL,
+  periode TEXT NOT NULL DEFAULT 'journee' CHECK (periode IN ('matin','apres_midi','journee')),
+  motif TEXT,
+  justifiee BOOLEAN NOT NULL DEFAULT FALSE,
+  remplacant_id INT REFERENCES users(id),
+  annee_scolaire TEXT NOT NULL,
+  deleted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (remplacant_id IS NULL OR remplacant_id <> enseignant_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_abs_ens_jour ON absences_enseignants(enseignant_id, date_absence) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_abs_ens_date ON absences_enseignants(date_absence);
+
+-- Réclamation d'un parent, suivie jusqu'à sa résolution (ouverte → en cours → résolue / rejetée)
+CREATE TABLE IF NOT EXISTS reclamations (
+  id SERIAL PRIMARY KEY,
+  parent_id INT NOT NULL REFERENCES users(id),
+  eleve_id INT REFERENCES eleves(id),
+  categorie TEXT NOT NULL DEFAULT 'autre' CHECK (categorie IN ('pedagogique','vie_scolaire','financier','administratif','autre')),
+  objet TEXT NOT NULL,
+  description TEXT NOT NULL,
+  statut TEXT NOT NULL DEFAULT 'ouverte' CHECK (statut IN ('ouverte','en_cours','resolue','rejetee')),
+  reponse TEXT,
+  traite_par INT REFERENCES users(id),
+  annee_scolaire TEXT NOT NULL,
+  resolved_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  deleted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_reclam_parent ON reclamations(parent_id);
+CREATE INDEX IF NOT EXISTS idx_reclam_statut ON reclamations(statut);

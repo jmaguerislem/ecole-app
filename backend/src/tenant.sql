@@ -34,7 +34,8 @@ DECLARE
   t TEXT; s1 INT; fk RECORD;
   tenant TEXT[] := ARRAY['users','classes','matieres','affectations','salles','eleves','eleve_parents','preinscriptions',
     'creneaux','evaluations','notes','absences','tarifs','paiements','messages','message_recipients','annonces',
-    'devoirs','depots','devoir_vus','notifications','notification_log','push_subscriptions','audit_log','access_log','tarifs_historique'];
+    'devoirs','depots','devoir_vus','notifications','notification_log','push_subscriptions','audit_log','access_log','tarifs_historique',
+    'retards','absences_enseignants','reclamations'];
   logs TEXT[] := ARRAY['audit_log','access_log','notification_log'];
   cond TEXT := $c$school_id = NULLIF(current_setting('app.school_id', true), '')::int$c$;
 BEGIN

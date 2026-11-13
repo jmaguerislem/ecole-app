@@ -16,9 +16,11 @@ const RELATIONS = [
   ['annonces', 'auteur_id', 'users'], ['devoirs', 'matiere_id', 'matieres'], ['devoirs', 'classe_id', 'classes'], ['devoirs', 'enseignant_id', 'users'],
   ['depots', 'devoir_id', 'devoirs'], ['depots', 'eleve_id', 'eleves'], ['devoir_vus', 'devoir_id', 'devoirs'], ['devoir_vus', 'eleve_id', 'eleves'], ['devoir_vus', 'parent_id', 'users'],
   ['notifications', 'user_id', 'users'],
+  ['retards', 'eleve_id', 'eleves'], ['absences_enseignants', 'enseignant_id', 'users'], ['absences_enseignants', 'remplacant_id', 'users'],
+  ['reclamations', 'parent_id', 'users'], ['reclamations', 'eleve_id', 'eleves'], ['reclamations', 'traite_par', 'users'],
 ];
 const SANS_ECOLE_INTERDIT = ['classes', 'matieres', 'affectations', 'salles', 'eleves', 'eleve_parents', 'preinscriptions', 'creneaux', 'evaluations', 'notes', 'absences', 'tarifs', 'paiements',
-  'messages', 'message_recipients', 'annonces', 'devoirs', 'depots', 'devoir_vus', 'notifications', 'tarifs_historique'];
+  'messages', 'message_recipients', 'annonces', 'devoirs', 'depots', 'devoir_vus', 'notifications', 'tarifs_historique', 'retards', 'absences_enseignants', 'reclamations'];
 
 async function verifier() {
   const problemes = [];

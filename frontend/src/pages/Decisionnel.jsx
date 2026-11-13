@@ -135,6 +135,8 @@ function Absences({ d }) {
         <Kpi n={fmt(k.jours_absence)} label="Jours d’absence" icon="calendar" sub={`${fmt(k.nombre_absences)} absences enregistrées`} />
         <Kpi n={fmt(k.non_justifiees)} label="Non justifiées" icon="alert-triangle" tone={k.non_justifiees ? 'warn' : 'ok'} sub={`${fmt(k.justifiees)} justifiées`} />
         <Kpi n={fmt(k.absences_repetitives)} label="Élèves à absences répétées" icon="users" tone={k.absences_repetitives ? 'bad' : 'ok'} />
+        <Kpi n={fmt(k.retards)} label="Retards d’arrivée" icon="clock" tone={k.retards ? 'warn' : 'ok'} sub={`${fmt(k.eleves_en_retard)} élève(s) · ${nd(k.retard_moyen_minutes, ' min')} en moyenne`} />
+        <Kpi n={fmt(k.retards_recurrents)} label="Retardataires récurrents" icon="user-x" tone={k.retards_recurrents ? 'bad' : 'ok'} sub="3 retards ou plus" />
         <Kpi n={nd(k.taux_devoirs_en_retard, ' %')} label="Devoirs rendus en retard" icon="clock" sub={`${fmt(k.devoirs_en_retard)} sur ${fmt(k.depots_total)} dépôts`} />
       </Kpis>
       <div className="grid charts">
@@ -145,6 +147,12 @@ function Absences({ d }) {
           <p className="small"><b>{d.relation.lecture}</b>{d.relation.correlation !== null && <span className="muted"> Coefficient de corrélation : {d.relation.correlation} (sur {d.relation.eleves} élèves).</span>}</p>
         </Carte>
       </div>
+      <Titre>Retards d’arrivée</Titre>
+      <div className="grid charts">
+        <Carte titre="Retards par mois"><Columns title="Retards d’arrivée par mois" data={d.retards.par_mois.map((m) => ({ label: m.label, retards: m.retards }))} series={[{ key: 'retards', label: 'Retards', color: ORANGE }]} /></Carte>
+        <Carte titre="Retards par classe"><Bars title="Retards par classe" data={d.retards.par_classe.map((c) => ({ label: c.nom, value: c.retards }))} /></Carte>
+      </div>
+      <Tbl vide="Aucun élève n’atteint le seuil de retards répétés." rows={d.retards.recurrents} cols={[{ h: 'Élève', f: (e) => e.nom }, { h: 'Classe', f: (e) => e.classe || '—' }, { h: 'Retards', f: (e) => <b>{e.retards}</b> }, { h: 'Minutes perdues', f: (e) => `${fmt(e.minutes)} min` }, { h: 'Dernier retard', f: (e) => e.dernier || '—' }]} />
       <Titre>Élèves à absences répétées</Titre>
       <Tbl vide="Aucun élève n’atteint le seuil d’absences répétées." rows={d.repetitives} cols={[{ h: 'Élève', f: (e) => e.nom }, { h: 'Classe', f: (e) => e.classe || '—' }, { h: 'Absences non justifiées', f: (e) => <b>{e.non_justifiees}</b> }, { h: 'Jours', f: (e) => fmt(e.jours) }, { h: 'Dernière absence', f: (e) => e.derniere || '—' }]} />
       <Titre>Élèves les plus absents</Titre>
@@ -156,6 +164,31 @@ function Absences({ d }) {
 
 // ---------- 5. Enseignants ----------
 const STATUT_ENS = { surcharge: ['Surcharge', 'bad'], sous_charge: ['Sous-charge', 'warn'], equilibre: ['Équilibrée', 'ok'] };
+const PERIODE = { journee: 'Journée', matin: 'Matin', apres_midi: 'Après-midi' };
+function AbsencesEns({ a }) {
+  const k = a.kpis;
+  return (
+    <>
+      <Titre>Absences et remplacements des enseignants</Titre>
+      <Kpis>
+        <Kpi n={fmt(k.jours)} label="Jours d’absence" icon="user-x" sub={`${fmt(k.absences)} absence(s) · ${nd(k.taux_absenteisme, ' %')} d’absentéisme`} />
+        <Kpi n={nd(k.taux_remplacement, ' %')} label="Taux de remplacement" icon="check-circle" tone={k.taux_remplacement !== null && k.taux_remplacement < 70 ? 'warn' : 'ok'} sub={`${fmt(k.remplacees)} remplacée(s) · ${fmt(k.non_remplacees)} sans remplaçant`} />
+        <Kpi n={`${fmt(k.heures_non_assurees)} h`} label="Heures de cours non assurées" icon="clock" tone={k.heures_non_assurees ? 'bad' : 'ok'} sub={`${fmt(k.heures_remplacees)} h assurées par un remplaçant`} />
+        <Kpi n={fmt(k.recurrentes)} label="Enseignants souvent absents" icon="alert-triangle" tone={k.recurrentes ? 'warn' : 'ok'} sub="3 absences ou plus" />
+        <Kpi n={fmt(k.a_pourvoir)} label="Absences à venir à pourvoir" icon="calendar" tone={k.a_pourvoir ? 'bad' : 'ok'} sub={`${fmt(k.absences_a_venir)} absence(s) à venir`} />
+      </Kpis>
+      <div className="grid charts">
+        <Carte titre="Jours d’absence par mois"><Columns title="Jours d’absence des enseignants par mois" unit=" j" data={a.par_mois.map((m) => ({ label: m.label, jours: m.jours }))} series={[{ key: 'jours', label: 'Jours', color: ORANGE }]} /></Carte>
+        <Carte titre="Absences et remplacements par enseignant"><Bars title="Jours d’absence par enseignant" unit=" j" data={a.par_enseignant.filter((p) => p.jours > 0).map((p) => ({ label: p.nom, value: p.jours }))} /></Carte>
+      </div>
+      <Tbl vide="Aucune absence d’enseignant enregistrée. Déclarez-les dans « Absences enseignants »." rows={a.par_enseignant} cols={[{ h: 'Enseignant', f: (p) => p.nom }, { h: 'Absences', f: (p) => p.absences }, { h: 'Jours', f: (p) => fmt(p.jours) }, { h: 'Non justifiées', f: (p) => p.non_justifiees }, { h: 'Sans remplaçant', f: (p) => (p.non_remplacees ? <Pill kind="bad">{p.non_remplacees}</Pill> : 0) }, { h: 'Remplacements assurés', f: (p) => p.remplacements }, { h: 'Heures remplacées', f: (p) => `${fmt(p.heures_remplacees)} h` }]} />
+      {a.non_remplacees.length > 0 && <><Titre>Absences passées sans remplaçant</Titre>
+        <Tbl rows={a.non_remplacees} cols={[{ h: 'Enseignant', f: (x) => x.enseignant }, { h: 'Date', f: (x) => x.date }, { h: 'Période', f: (x) => PERIODE[x.periode] }, { h: 'Motif', f: (x) => x.motif || '—' }, { h: 'Cours non assurés', f: (x) => `${fmt(x.heures)} h` }]} /></>}
+      {a.a_venir.length > 0 && <><Titre>Absences à venir</Titre>
+        <Tbl rows={a.a_venir} cols={[{ h: 'Enseignant', f: (x) => x.enseignant }, { h: 'Date', f: (x) => x.date }, { h: 'Période', f: (x) => PERIODE[x.periode] }, { h: 'Remplaçant', f: (x) => x.remplacant || <Pill kind="bad">À désigner</Pill> }, { h: 'Cours concernés', f: (x) => `${fmt(x.heures)} h` }]} /></>}
+    </>
+  );
+}
 function Enseignants({ d }) {
   const k = d.kpis;
   return (
@@ -177,6 +210,7 @@ function Enseignants({ d }) {
       <Tbl rows={d.enseignants} cols={[{ h: 'Enseignant', f: (e) => e.nom }, { h: 'Matières', f: (e) => e.matieres.join(', ') || '—' }, { h: 'Niveaux', f: (e) => e.niveaux.map(court).join(', ') || '—' }, { h: 'Classes', f: (e) => e.classes }, { h: 'Jours', f: (e) => e.jours }, { h: 'Heures / semaine', f: (e) => <b>{fmt(e.heures)}</b> }, { h: 'Charge', f: (e) => <Pill kind={STATUT_ENS[e.statut][1]}>{STATUT_ENS[e.statut][0]}</Pill> }]} />
       <Titre>Enseignants par matière</Titre>
       <Tbl rows={d.par_matiere} cols={[{ h: 'Matière', f: (m) => m.nom }, { h: 'Enseignants', f: (m) => m.enseignants }, { h: 'Heures / semaine', f: (m) => fmt(m.heures) }]} />
+      <AbsencesEns a={d.absences} />
       <Explication d={d} />
     </>
   );
@@ -215,6 +249,27 @@ function Inscriptions({ d }) {
 }
 
 // ---------- 7. Parents ----------
+const STATUT_REC = { ouverte: ['Ouverte', 'warn'], en_cours: ['En cours', ''], resolue: ['Résolue', 'ok'], rejetee: ['Rejetée', 'bad'] };
+function Reclamations({ d }) {
+  const k = d.kpis; const r = d.reclamations;
+  return (
+    <>
+      <Titre>Réclamations des parents</Titre>
+      <Kpis>
+        <Kpi n={fmt(k.reclamations)} label="Réclamations cette année" icon="inbox" sub={`${fmt(k.reclamations_resolues)} résolue(s)`} />
+        <Kpi n={fmt(k.reclamations_ouvertes)} label="À traiter" icon="alert-triangle" tone={k.reclamations_ouvertes ? 'warn' : 'ok'} sub="ouvertes ou en cours" />
+        <Kpi n={fmt(k.reclamations_en_retard)} label="En attente depuis plus de 7 jours" icon="clock" tone={k.reclamations_en_retard ? 'bad' : 'ok'} />
+        <Kpi n={nd(k.taux_resolution, ' %')} label="Taux de résolution" icon="check-circle" tone="ok" />
+        <Kpi n={nd(k.delai_traitement_jours, ' j')} label="Délai moyen de traitement" icon="calendar" sub="du dépôt à la résolution" />
+      </Kpis>
+      <div className="grid charts">
+        <Carte titre="Par statut"><Donut title="Réclamations par statut" data={r.par_statut.map((x, i) => ({ label: STATUT_REC[x.statut][0], value: x.nombre, color: [ORANGE, BLEU, VERT, ROUGE][i] }))} center={String(k.reclamations)} /></Carte>
+        <Carte titre="Par catégorie"><Bars title="Réclamations par catégorie" data={r.par_categorie.map((x) => ({ label: x.label, value: x.nombre }))} /></Carte>
+      </div>
+      <Tbl vide="Aucune réclamation en attente de traitement." rows={r.en_attente} cols={[{ h: 'Parent', f: (x) => x.parent }, { h: 'Catégorie', f: (x) => x.categorie }, { h: 'Objet', f: (x) => x.objet }, { h: 'Statut', f: (x) => <Pill kind={STATUT_REC[x.statut][1]}>{STATUT_REC[x.statut][0]}</Pill> }, { h: 'Depuis', f: (x) => <Pill kind={x.en_retard ? 'bad' : 'warn'}>{x.jours} jour{x.jours > 1 ? 's' : ''}</Pill> }]} />
+    </>
+  );
+}
 function Parents({ d }) {
   const k = d.kpis;
   return (
@@ -229,13 +284,14 @@ function Parents({ d }) {
       <div className="grid charts">
         <Carte titre="Messages envoyés et lus par mois" large><Columns title="Messages aux parents" data={d.par_mois.map((m) => ({ label: m.label, destinataires: m.destinataires, lus: m.lus }))} series={[{ key: 'destinataires', label: 'Messages reçus', color: GRIS }, { key: 'lus', label: 'Messages lus', color: VERT }]} /></Carte>
       </div>
+      <Reclamations d={d} />
       <Titre>Suivi parental à renforcer (parents d’élèves à risque)</Titre>
       <Tbl vide="Aucun parent d’élève à risque ne nécessite de renforcement." rows={d.suivi_renforce} cols={[{ h: 'Parent', f: (r) => r.parent }, { h: 'Téléphone', f: (r) => r.telephone || '—' }, { h: 'Élève', f: (r) => `${r.eleve}${r.classe ? ` (${r.classe})` : ''}` }, { h: 'Risque', f: (r) => <Pill kind={RISQUE[r.niveau][1]}>{RISQUE[r.niveau][0]}</Pill> }, { h: 'Constat', f: (r) => r.constat }, { h: 'Motif', f: (r) => r.raison }]} />
       <Titre>Parents qui n’ont lu aucun message</Titre>
       <Tbl vide="Tous les parents ont lu au moins un message." rows={d.parents_sans_lecture} cols={[{ h: 'Parent', f: (p) => p.nom }, { h: 'Téléphone', f: (p) => p.telephone || '—' }, { h: 'Messages reçus', f: (p) => p.recus }]} />
       <Titre>Parents qui lisent peu</Titre>
       <Tbl vide="Aucun parent dans ce cas." rows={d.parents_lecture_faible} cols={[{ h: 'Parent', f: (p) => p.nom }, { h: 'Téléphone', f: (p) => p.telephone || '—' }, { h: 'Reçus', f: (p) => p.recus }, { h: 'Lus', f: (p) => p.lus }, { h: 'Taux de lecture', f: (p) => <Jauge v={p.taux} tone="warn" /> }]} />
-      <Titre>Demandes des parents en attente de réponse</Titre>
+      <Titre>Messages des parents en attente de réponse</Titre>
       <Tbl vide="Toutes les demandes ont reçu une réponse." rows={d.demandes_en_attente} cols={[{ h: 'Parent', f: (r) => r.parent }, { h: 'Objet', f: (r) => r.objet }, { h: 'Depuis', f: (r) => <Pill kind={r.en_retard ? 'bad' : 'warn'}>{r.jours} jour{r.jours > 1 ? 's' : ''}</Pill> }]} />
       <Explication d={d} />
     </>
