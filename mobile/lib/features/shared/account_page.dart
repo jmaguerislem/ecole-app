@@ -160,8 +160,9 @@ class _PasswordSheetState extends State<_PasswordSheet> {
             if (v == null || v.length < 10) return '10 caractères minimum';
             if (!RegExp(r'[a-z]').hasMatch(v) ||
                 !RegExp(r'[A-Z]').hasMatch(v) ||
-                !RegExp(r'\d').hasMatch(v))
+                !RegExp(r'\d').hasMatch(v)) {
               return 'Une minuscule, une majuscule et un chiffre';
+            }
             return null;
           }),
           const SizedBox(height: 12),

@@ -26,6 +26,7 @@ import ProfilSuperAdmin from './pages/ProfilSuperAdmin.jsx';
 import ChangerMotDePasse from './pages/ChangerMotDePasse.jsx';
 import SuperLayout from './components/SuperLayout.jsx';
 import StatsEcole from './pages/StatsEcole.jsx';
+import Decisionnel from './pages/Decisionnel.jsx';
 
 // Menu par rôle (RBAC côté interface – le serveur applique de toute façon les droits).
 // Les entrées sont regroupées par domaine pour réduire la charge de lecture d'un menu de 22 liens.
@@ -34,6 +35,7 @@ const NAV = [
   { title: 'Pilotage', items: [
     ['/', 'Tableau de bord', 'dashboard', TOUS],
     ['/statistiques', "Statistiques de l'école", 'dashboard', ['admin']], // le directeur ne voit que SON école
+    ['/decisionnel', 'Aide à la décision', 'presentation', ['admin']], // BI : 10 tableaux de bord du directeur
   ] },
   { title: 'Scolarité', items: [
     ['/eleves', 'Élèves', 'graduation', ['admin', 'comptable', 'enseignant']],
@@ -193,6 +195,7 @@ export default function App() {
       <Route path="/preinscription/:slug" element={<Preinscription />} />
       <Route path="/" element={guard(<Dashboard />)} />
       <Route path="/statistiques" element={guardRoles(['admin'], <StatsEcole />)} />
+      <Route path="/decisionnel" element={guardRoles(['admin'], <Decisionnel />)} />
       <Route path="/eleves" element={guard(<P.Eleves />)} />
       <Route path="/preinscriptions" element={guard(<P.Preinscriptions />)} />
       <Route path="/classes" element={guard(<P.Classes />)} />

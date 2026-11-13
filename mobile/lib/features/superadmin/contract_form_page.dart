@@ -30,8 +30,9 @@ class _ContractFormPageState extends State<ContractFormPage> {
   @override
   void initState() {
     super.initState();
-    if (_c['date_debut'] != null)
+    if (_c['date_debut'] != null) {
       _debut = '${_c['date_debut']}'.substring(0, 10);
+    }
     if (_c['date_fin'] != null) _fin = '${_c['date_fin']}'.substring(0, 10);
   }
 

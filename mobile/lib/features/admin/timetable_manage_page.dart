@@ -58,7 +58,9 @@ class _TimetableManagePageState extends State<TimetableManagePage> {
   Future<void> _delete(Map<String, dynamic> c) async {
     if (!await confirm(context, 'Supprimer la séance ?',
         '${c['matiere_nom']} · ${joursSemaine[toInt(c['jour']) - 1]} ${hm(c['heure_debut'])}–${hm(c['heure_fin'])}',
-        action: 'Supprimer', danger: true)) return;
+        action: 'Supprimer', danger: true)) {
+      return;
+    }
     try {
       await api.delete('/creneaux/${c['id']}');
       if (mounted) {
@@ -76,16 +78,18 @@ class _TimetableManagePageState extends State<TimetableManagePage> {
       key: ValueKey(_version),
       load: _load,
       builder: (context, d, reload) {
-        if (d.classes.isEmpty)
+        if (d.classes.isEmpty) {
           return ScrollPage(children: const [
             EmptyBox(
                 icon: Icons.class_outlined,
                 text:
                     'Créez d\'abord une classe pour construire son emploi du temps.')
           ]);
+        }
         _classe ??= toInt(d.classes.first['id']);
-        if (!d.classes.any((c) => toInt(c['id']) == _classe))
+        if (!d.classes.any((c) => toInt(c['id']) == _classe)) {
           _classe = toInt(d.classes.first['id']);
+        }
         final list = d.creneaux
             .where((c) =>
                 toInt(c['classe_id']) == _classe && toInt(c['jour']) == _jour)

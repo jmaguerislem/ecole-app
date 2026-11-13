@@ -18,12 +18,13 @@ class TimetableView extends StatelessWidget {
       key: ValueKey('edt$classeId'),
       load: () => api.getList('/creneaux', query: {'classe_id': classeId}),
       builder: (context, list, reload) {
-        if (list.isEmpty)
+        if (list.isEmpty) {
           return ScrollPage(children: const [
             EmptyBox(
                 icon: Icons.calendar_month_outlined,
                 text: 'Aucun cours programmé pour le moment.')
           ]);
+        }
         final today = DateTime.now().weekday;
         return ScrollPage(children: [
           for (var j = 1; j <= 6; j++)

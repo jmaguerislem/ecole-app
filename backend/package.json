@@ -12,6 +12,7 @@
     "seed:ecoles": "node src/seed-ecoles.js",
     "seed:demo": "node src/seed-demo.js",
     "ecoles:completer": "node src/scripts/completer-ecoles.js",
+    "seed:decisionnel": "node src/scripts/donnees-decisionnel.js",
     "superadmin": "node src/scripts/create-superadmin.js",
     "test": "node --test --test-concurrency=1 tests/*.test.js",
     "ecoles:verifier": "node src/scripts/verifier-coherence-ecoles.js"

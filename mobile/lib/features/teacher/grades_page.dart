@@ -35,13 +35,14 @@ class _GradesPageState extends State<GradesPage> {
         key: ValueKey(_version),
         load: () => api.getList('/evaluations'),
         builder: (context, list, reload) {
-          if (list.isEmpty)
+          if (list.isEmpty) {
             return ScrollPage(children: const [
               EmptyBox(
                   icon: Icons.grade_outlined,
                   text:
                       'Aucune évaluation. Créez-en une pour saisir les notes.')
             ]);
+          }
           return ListView.separated(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
@@ -112,8 +113,9 @@ class _GradeEntryPageState extends State<GradeEntryPage> {
     final v = parseDecimal(t);
     if (v == null) return 'Nombre invalide';
     if (v < 0 || v > bareme) return 'Entre 0 et $bareme';
-    if ((v * 4 - (v * 4).roundToDouble()).abs() > 1e-9)
+    if ((v * 4 - (v * 4).roundToDouble()).abs() > 1e-9) {
       return 'Par pas de 0,25';
+    }
     return null;
   }
 
@@ -159,8 +161,9 @@ class _GradeEntryPageState extends State<GradeEntryPage> {
       body: FutureBuilder<Map<String, dynamic>>(
         future: _future,
         builder: (context, snap) {
-          if (snap.connectionState != ConnectionState.done)
+          if (snap.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
+          }
           if (snap.hasError) return ErrorBox(message: errorText(snap.error!));
           final d = snap.data!;
           final ev = asMap(d['evaluation']);
@@ -255,17 +258,19 @@ class _EvaluationFormPageState extends State<EvaluationFormPage> {
   Future<void> _loadAff() async {
     try {
       final a = await api.getList('/affectations');
-      if (mounted)
+      if (mounted) {
         setState(() {
           _aff = a;
           _loaded = true;
         });
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _error = errorText(e);
           _loaded = true;
         });
+      }
     }
   }
 
@@ -307,9 +312,10 @@ class _EvaluationFormPageState extends State<EvaluationFormPage> {
     for (final a in _aff) {
       classes[toInt(a['classe_id'])] =
           '${a['classe_nom'] ?? a['classe'] ?? 'Classe ${a['classe_id']}'}';
-      if (_classe == null || toInt(a['classe_id']) == _classe)
+      if (_classe == null || toInt(a['classe_id']) == _classe) {
         matieres[toInt(a['matiere_id'])] =
             '${a['matiere_nom'] ?? a['matiere'] ?? 'Matière ${a['matiere_id']}'}';
+      }
     }
     return Scaffold(
       appBar: AppBar(title: const Text('Nouvelle évaluation')),

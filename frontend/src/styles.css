@@ -403,3 +403,9 @@ html.native .side{padding-top:env(safe-area-inset-top)}
 .menu-list a[aria-current=page]{background:rgba(255,255,255,.14);color:#fff;font-weight:700}
 .menu-list a[aria-current=page]::before{content:"";position:absolute;left:-.6rem;top:8px;bottom:8px;width:4px;border-radius:0 4px 4px 0;background:#F0645A}
 .menu-list :focus-visible{outline-color:#fff}
+
+/* Aide à la décision (BI) : jauge de remplissage */
+.meter{display:inline-block;width:84px;height:.5rem;background:var(--line);border-radius:99px;overflow:hidden;vertical-align:middle}
+.meter>i{display:block;height:100%;background:var(--accent);border-radius:99px}
+.meter.ok>i{background:var(--ok)} .meter.warn>i{background:var(--warn)} .meter.bad>i{background:var(--bad)}
+.tabs button .icon{vertical-align:-3px}

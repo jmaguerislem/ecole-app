@@ -19,6 +19,7 @@ const appel = require('./routes/appel');
 const saas = require('./routes/saas');
 const demo = require('./routes/demo');
 const stats = require('./routes/stats');
+const bi = require('./routes/bi');
 const A = require('./services/absences');
 const { listerEcoles } = require('./services/ecoles');
 
@@ -46,6 +47,7 @@ app.use('/api', account.pub);
 app.use('/api', auth, account.priv);
 app.use('/api/saas', auth, saas); // gestion des écoles (super-administrateur)
 app.use('/api/stats', auth, stats); // statistiques globales (directeurs + super-administrateur) : compteurs agrégés de toutes les écoles
+app.use('/api/bi', auth, bi); // aide à la décision (BI) : directeur uniquement, lecture seule
 app.use('/api/users', auth, E.usersExtra);
 app.use('/api/users', E.users);
 app.use('/api/classes', E.classes);

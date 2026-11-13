@@ -93,10 +93,12 @@ String? Function(String?) vMoney(String label,
       if (t.isEmpty) return required ? '$label est obligatoire' : null;
       final n = parseDecimal(t);
       if (n == null) return '$label : nombre invalide';
-      if (n < min)
+      if (n < min) {
         return '$label doit être supérieur ou égal à ${min.toStringAsFixed(0)}';
-      if (max != null && n > max)
+      }
+      if (max != null && n > max) {
         return '$label ne peut pas dépasser ${max.toStringAsFixed(0)}';
+      }
       return null;
     };
 

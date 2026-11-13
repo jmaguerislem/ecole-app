@@ -6,14 +6,17 @@ import '../../core/ui.dart';
 StatusChip schoolStatusChip(Map<String, dynamic> s) {
   final status = '${s['status']}';
   final ouverte = s['ouverte'] != false;
-  if (status == 'suspended')
+  if (status == 'suspended') {
     return const StatusChip('Désactivée', AppColors.bad, icon: Icons.block);
-  if (!ouverte)
+  }
+  if (!ouverte) {
     return const StatusChip('Abonnement expiré', AppColors.warn,
         icon: Icons.event_busy);
-  if (status == 'trial')
+  }
+  if (status == 'trial') {
     return const StatusChip('Essai', AppColors.info,
         icon: Icons.hourglass_bottom);
+  }
   return const StatusChip('Active', AppColors.ok, icon: Icons.check_circle);
 }
 

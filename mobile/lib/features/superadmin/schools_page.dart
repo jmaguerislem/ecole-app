@@ -37,8 +37,9 @@ class _SchoolsPageState extends State<SchoolsPage> {
     try {
       await api.put('/saas/schools/${s['id']}',
           body: {'status': active ? 'suspended' : 'active'});
-      if (mounted)
+      if (mounted) {
         showOk(context, active ? 'École désactivée' : 'École activée');
+      }
       _refresh();
     } catch (e) {
       if (mounted) showError(context, e);

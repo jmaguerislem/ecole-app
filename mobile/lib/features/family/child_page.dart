@@ -137,9 +137,10 @@ class _AbsencesState extends State<_Absences> {
     c.dispose();
     if (ok != true) return;
     if (text.length < 3) {
-      if (mounted)
+      if (mounted) {
         showError(context,
             ApiException(0, 'Précisez le motif (3 caractères minimum).'));
+      }
       return;
     }
     try {
@@ -160,12 +161,13 @@ class _AbsencesState extends State<_Absences> {
       key: ValueKey(_version),
       load: () => api.getList('/absences', query: {'eleve_id': widget.eleveId}),
       builder: (context, list, reload) {
-        if (list.isEmpty)
+        if (list.isEmpty) {
           return ScrollPage(children: const [
             EmptyBox(
                 icon: Icons.event_available,
                 text: 'Aucune absence enregistrée.')
           ]);
+        }
         const periodes = {
           'matin': 'Matin',
           'apres_midi': 'Après-midi',
@@ -222,10 +224,11 @@ class _Devoirs extends StatelessWidget {
     return AsyncView<List<Map<String, dynamic>>>(
       load: () => api.getList('/devoirs', query: {'eleve_id': eleveId}),
       builder: (context, list, reload) {
-        if (list.isEmpty)
+        if (list.isEmpty) {
           return ScrollPage(children: const [
             EmptyBox(icon: Icons.assignment_outlined, text: 'Aucun devoir.')
           ]);
+        }
         return ScrollPage(children: [
           for (final d in list)
             Padding(

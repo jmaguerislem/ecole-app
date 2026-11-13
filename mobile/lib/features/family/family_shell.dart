@@ -111,11 +111,12 @@ class _FamilyTimetableState extends State<_FamilyTimetable> {
     return AsyncView<List<Map<String, dynamic>>>(
       load: () => api.getList('/classes'),
       builder: (context, classes, reload) {
-        if (classes.isEmpty)
+        if (classes.isEmpty) {
           return ScrollPage(children: const [
             EmptyBox(
                 icon: Icons.calendar_month_outlined, text: 'Aucune classe.')
           ]);
+        }
         _classe ??= toInt(classes.first['id']);
         return Column(children: [
           if (classes.length > 1)

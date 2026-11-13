@@ -38,11 +38,12 @@ class _NotificationsPageState extends State<NotificationsPage> {
         key: ValueKey(_version),
         load: () => api.getList('/notifications'),
         builder: (context, list, reload) {
-          if (list.isEmpty)
+          if (list.isEmpty) {
             return ScrollPage(children: const [
               EmptyBox(
                   icon: Icons.notifications_none, text: 'Aucune notification.')
             ]);
+          }
           return ListView.separated(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.all(16),

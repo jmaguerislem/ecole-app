@@ -43,10 +43,11 @@ class _AnnoncesPageState extends State<AnnoncesPage> {
         key: ValueKey(_version),
         load: () => api.getList('/annonces'),
         builder: (context, list, reload) {
-          if (list.isEmpty)
+          if (list.isEmpty) {
             return ScrollPage(children: const [
               EmptyBox(icon: Icons.campaign_outlined, text: 'Aucune annonce.')
             ]);
+          }
           return ListView.separated(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),

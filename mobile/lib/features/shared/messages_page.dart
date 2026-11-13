@@ -68,7 +68,7 @@ class _Box extends StatelessWidget {
       key: ValueKey('$box$version'),
       load: () => api.getList('/messages', query: {'box': box}),
       builder: (context, list, reload) {
-        if (list.isEmpty)
+        if (list.isEmpty) {
           return ScrollPage(children: [
             EmptyBox(
                 icon: Icons.mail_outline,
@@ -76,6 +76,7 @@ class _Box extends StatelessWidget {
                     ? 'Aucun message reçu.'
                     : 'Aucun message envoyé.')
           ]);
+        }
         return ListView.separated(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),

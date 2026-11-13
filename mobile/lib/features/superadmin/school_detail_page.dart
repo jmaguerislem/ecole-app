@@ -168,8 +168,9 @@ class _InfoTab extends StatelessWidget {
           try {
             await api.put('/saas/schools/${e['id']}',
                 body: {'status': active ? 'suspended' : 'active'});
-            if (context.mounted)
+            if (context.mounted) {
               showOk(context, active ? 'École désactivée' : 'École activée');
+            }
             onChanged();
           } catch (err) {
             if (context.mounted) showError(context, err);

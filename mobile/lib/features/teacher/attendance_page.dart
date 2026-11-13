@@ -56,9 +56,10 @@ class _AttendancePageState extends State<AttendancePage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loadingClasses)
+    if (_loadingClasses) {
       return const Center(child: CircularProgressIndicator());
-    if (_error != null)
+    }
+    if (_error != null) {
       return ErrorBox(
           message: _error!,
           onRetry: () {
@@ -68,12 +69,14 @@ class _AttendancePageState extends State<AttendancePage> {
             });
             _init();
           });
-    if (_classes.isEmpty)
+    }
+    if (_classes.isEmpty) {
       return ScrollPage(children: const [
         EmptyBox(
             icon: Icons.class_outlined,
             text: 'Aucune classe ne vous est affectée pour le moment.')
       ]);
+    }
     return Column(children: [
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -180,9 +183,10 @@ class _RollState extends State<_Roll> {
         'date_absence': widget.date,
         'absents': absents
       });
-      if (mounted)
+      if (mounted) {
         showOk(
             context, 'Appel enregistré : ${pluriel(absents.length, 'absent')}');
+      }
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
@@ -195,19 +199,22 @@ class _RollState extends State<_Roll> {
     return FutureBuilder<List<Map<String, dynamic>>>(
       future: _future,
       builder: (context, snap) {
-        if (snap.connectionState != ConnectionState.done)
+        if (snap.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
-        if (snap.hasError)
+        }
+        if (snap.hasError) {
           return ErrorBox(
               message: errorText(snap.error!),
               onRetry: () => setState(() => _future = _load()));
+        }
         final eleves = snap.data!;
-        if (eleves.isEmpty)
+        if (eleves.isEmpty) {
           return ScrollPage(children: const [
             EmptyBox(
                 icon: Icons.groups_outlined,
                 text: 'Aucun élève actif dans cette classe.')
           ]);
+        }
         final nbAbs = _absent.values.where((v) => v != null).length;
         return Column(children: [
           Expanded(

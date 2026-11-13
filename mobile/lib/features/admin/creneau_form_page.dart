@@ -118,8 +118,9 @@ class _CreneauFormPageState extends State<CreneauFormPage> {
       });
     } catch (e) {
       // Erreur de forme (ex. heure de fin avant le début) : message du serveur, sans bloquer la saisie.
-      if (mounted && seq == _checkSeq)
+      if (mounted && seq == _checkSeq) {
         setState(() => _checkError = errorText(e));
+      }
     } finally {
       if (mounted && seq == _checkSeq) setState(() => _checking = false);
     }

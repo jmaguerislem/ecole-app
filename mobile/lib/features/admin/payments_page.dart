@@ -60,7 +60,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
                           .toLowerCase()
                           .contains(_q))
                   .toList();
-              if (list.isEmpty)
+              if (list.isEmpty) {
                 return ScrollPage(children: [
                   EmptyBox(
                       icon: Icons.payments_outlined,
@@ -68,6 +68,7 @@ class _PaymentsPageState extends State<PaymentsPage> {
                           ? 'Aucun paiement enregistré.'
                           : 'Aucun résultat.')
                 ]);
+              }
               return ListView.separated(
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),

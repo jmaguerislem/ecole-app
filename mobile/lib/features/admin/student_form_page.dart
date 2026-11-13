@@ -45,8 +45,9 @@ class _StudentFormPageState extends State<StudentFormPage> {
   @override
   void initState() {
     super.initState();
-    if (_e['date_naissance'] != null)
+    if (_e['date_naissance'] != null) {
       _naissance = '${_e['date_naissance']}'.substring(0, 10);
+    }
     _sexe = _e['sexe'] == null ? null : '${_e['sexe']}';
     _classe = _e['classe_id'] == null ? null : toNumInt(_e['classe_id']);
     _statut = _e['statut'] == null ? 'actif' : '${_e['statut']}';
@@ -97,8 +98,9 @@ class _StudentFormPageState extends State<StudentFormPage> {
     if (v == null || v.length < 10) return '10 caractères minimum';
     if (!RegExp(r'[a-z]').hasMatch(v) ||
         !RegExp(r'[A-Z]').hasMatch(v) ||
-        !RegExp(r'\d').hasMatch(v))
+        !RegExp(r'\d').hasMatch(v)) {
       return 'Une minuscule, une majuscule et un chiffre';
+    }
     return null;
   }
 
