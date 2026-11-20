@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { api } from '../api.js';
 import AuthShell from '../components/AuthShell.jsx';
 import Icon from '../components/Icon.jsx';
@@ -16,6 +16,8 @@ export default function Inscription() {
     try { setOk(await api('/public/signup', { method: 'POST', body: { nom: v.nom, email: v.email, password: v.password } })); }
     catch (x) { setErr(x.message); } finally { setBusy(false); }
   };
+  // Adresse à confirmer : le serveur a envoyé un code par e-mail (page dédiée pour le saisir)
+  if (ok?.verification_requise) return <Navigate to={`/verifier-email?email=${encodeURIComponent(v.email.trim())}${ok.email_envoye ? '' : '&envoye=0'}`} replace />;
   if (ok) {
     return (
       <AuthShell title="Votre école est créée">

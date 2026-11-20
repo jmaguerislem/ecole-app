@@ -1,5 +1,5 @@
 // Règles de saisie partagées : chaque fonction nettoie la valeur (trim) et lève une HttpError 400 explicite si elle est invalide.
-const { HttpError } = require('../util');
+const { HttpError, checkNaissance } = require('../util');
 const { normDate, aujourdhui } = require('./absences');
 
 const bad = (m) => { throw new HttpError(400, m); };
@@ -7,10 +7,14 @@ const NIVEAUX = ['1ère année', '2ème année', '3ème année', '4ème année',
 const NOM_RE = /^\p{L}[\p{L}\p{M} '’.-]*$/u;
 const LIBELLE_RE = /^[\p{L}\p{N}][\p{L}\p{N}\p{M} '’.,&()/+–—-]*$/u;
 const vide = (v) => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
+// Caractères de contrôle (NUL, etc.) : jamais saisis légitimement ; le NUL fait d'ailleurs échouer PostgreSQL. Retours à la ligne et tabulations restent permis.
+const CONTROLE_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
 
 // Texte : trim, longueur min/max, format optionnel. `multiligne` conserve les retours à la ligne.
 function texte(v, label, { min = 0, max = 255, required = false, re, reMsg, multiligne = false } = {}) {
   if (vide(v)) { if (required) bad(`${label} : champ obligatoire`); return null; }
+  if (typeof v === 'object') bad(`${label} : texte invalide`);
+  if (CONTROLE_RE.test(String(v))) bad(`${label} : caractères non autorisés`);
   const t = multiligne ? String(v).replace(/\r\n/g, '\n').trim() : String(v).trim().replace(/\s+/g, ' ');
   if (t.length < min) bad(`${label} : ${min} caractères minimum`);
   if (t.length > max) bad(`${label} : ${max} caractères maximum`);
@@ -39,6 +43,12 @@ function date(v, label, { min, max, required = false } = {}) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso) || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== iso) bad(`${label} : date invalide`);
   if (min && iso < min) bad(`${label} : ne peut pas être antérieure au ${min.split('-').reverse().join('/')}`);
   if (max && iso > max) bad(`${label} : ne peut pas être postérieure au ${max.split('-').reverse().join('/')}`);
+  return iso;
+}
+// Date de naissance d'un élève : jour réel du calendrier, âge compris entre 6 et 20 ans. Renvoie « AAAA-MM-JJ ».
+function dateNaissance(v, label = 'La date de naissance', { required = false } = {}) {
+  const iso = date(v, label, { required });
+  if (iso) checkNaissance(iso);
   return iso;
 }
 // Bornes d'une année scolaire « 2026-2027 » : 1er septembre → 31 août
@@ -101,6 +111,7 @@ function preinscription(b, { complet = true } = {}) {
   if (has('parent_nom')) o.parent_nom = nomPropre(b.parent_nom, 'Le nom du parent');
   if (has('parent_prenom')) o.parent_prenom = nomPropre(b.parent_prenom, 'Le prénom du parent');
   if (has('parent_email')) o.parent_email = email(b.parent_email, "L'e-mail du parent");
+  if (has('date_naissance')) o.date_naissance = dateNaissance(b.date_naissance, "La date de naissance de l'enfant", { required: true });
   if (has('sexe')) o.sexe = choix(b.sexe, 'Le sexe', ['M', 'F']);
   if (has('niveau_souhaite')) o.niveau_souhaite = choix(b.niveau_souhaite, 'Le niveau souhaité', NIVEAUX);
   if (has('adresse')) o.adresse = texte(b.adresse, "L'adresse", { max: 200 });
@@ -108,4 +119,4 @@ function preinscription(b, { complet = true } = {}) {
   return o;
 }
 
-module.exports = { NIVEAUX, aujourdhui, texte, nomPropre, libelle, nombre, date, bornesAnnee, annee, choix, email, url, photo, heure, motDePasse, entiersId, preinscription };
+module.exports = { NIVEAUX, aujourdhui, texte, nomPropre, libelle, nombre, date, dateNaissance, bornesAnnee, annee, choix, email, url, photo, heure, motDePasse, entiersId, preinscription };

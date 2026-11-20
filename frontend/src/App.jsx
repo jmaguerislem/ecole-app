@@ -7,6 +7,8 @@ import { Avatar, EmptyState, PageHeader, Spinner } from './components/ui.jsx';
 import Login from './pages/Login.jsx';
 import Preinscription from './pages/Preinscription.jsx';
 import Inscription from './pages/Inscription.jsx';
+import MotDePasseOublie from './pages/MotDePasseOublie.jsx';
+import VerifierEmail from './pages/VerifierEmail.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import * as P from './pages/Entities.jsx';
 import Notes from './pages/Notes.jsx';
@@ -195,6 +197,8 @@ export default function App() {
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <Login />} />
       <Route path="/inscription" element={user ? <Navigate to="/" replace /> : <Inscription />} />
+      <Route path="/mot-de-passe-oublie" element={user ? <Navigate to="/" replace /> : <MotDePasseOublie />} />
+      <Route path="/verifier-email" element={user ? <Navigate to="/" replace /> : <VerifierEmail />} />
       <Route path="/preinscription" element={<Preinscription />} />
       <Route path="/preinscription/:slug" element={<Preinscription />} />
       <Route path="/" element={guard(<Dashboard />)} />

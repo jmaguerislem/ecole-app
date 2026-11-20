@@ -15,7 +15,8 @@
     "seed:decisionnel": "node src/scripts/donnees-decisionnel.js",
     "superadmin": "node src/scripts/create-superadmin.js",
     "test": "node --test --test-concurrency=1 tests/*.test.js",
-    "ecoles:verifier": "node src/scripts/verifier-coherence-ecoles.js"
+    "ecoles:verifier": "node src/scripts/verifier-coherence-ecoles.js",
+    "mail:test": "node src/scripts/test-email.js"
   },
   "engines": {
     "node": ">=18"

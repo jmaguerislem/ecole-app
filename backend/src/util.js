@@ -62,7 +62,8 @@ const AGE_MIN = 6;
 function ageEn(dateStr, ref = new Date()) {
   const str = String(dateStr || '').slice(0, 10);
   const d = new Date(`${str}T00:00:00`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(str) || Number.isNaN(d.getTime())) return null;
+  // Le jour doit exister au calendrier (le 30 février est refusé, il serait sinon rejeté par la base : erreur 500)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(str) || Number.isNaN(d.getTime()) || new Date(`${str}T12:00:00Z`).toISOString().slice(0, 10) !== str) return null;
   let age = ref.getFullYear() - d.getFullYear();
   if (ref.getMonth() < d.getMonth() || (ref.getMonth() === d.getMonth() && ref.getDate() < d.getDate())) age--;
   return age;

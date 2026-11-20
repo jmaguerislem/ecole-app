@@ -19,4 +19,11 @@ async function envoyerEmail({ to, subject, text }) {
   try { await transport.sendMail({ from: config.mailFrom, to, subject, text }); return { ok: true }; }
   catch (e) { return { ok: false, error: String(e.message || e).slice(0, 300) }; }
 }
-module.exports = { envoyerEmail, sent, simulerEchec: (m) => { forcerEchec = m; } };
+// Un envoi d'e-mail est-il possible ? (SMTP configuré, ou boîte mémoire des tests)
+const mailerDisponible = () => !!transport || memory();
+// Vérifie la connexion et l'authentification au serveur SMTP sans envoyer de message (script `npm run mail:test`)
+async function verifierSmtp() {
+  if (!transport) return { ok: false, error: 'SMTP non configuré (définir SMTP_HOST, SMTP_USER, SMTP_PASS dans backend/.env)' };
+  try { await transport.verify(); return { ok: true }; } catch (e) { return { ok: false, error: String(e.message || e).slice(0, 300) }; }
+}
+module.exports = { envoyerEmail, mailerDisponible, verifierSmtp, sent, simulerEchec: (m) => { forcerEchec = m; } };

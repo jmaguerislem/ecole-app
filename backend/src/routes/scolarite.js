@@ -168,8 +168,11 @@ notes.get('/evaluations/:id(\\d+)/notes', allow('admin', 'enseignant'), ah(async
 notes.put('/evaluations/:id(\\d+)/notes', allow('admin', 'enseignant'), ah(async (req, res) => {
   const ev = await loadEval(req);
   const list = Array.isArray(req.body.notes) ? req.body.notes : [];
+  if (list.length > 500) throw new HttpError(400, 'Trop de notes dans une même requête (500 maximum)');
   await tx(async (cl) => {
     for (const it of list) {
+      if (!it || typeof it !== 'object' || Array.isArray(it)) throw new HttpError(400, 'Ligne de notes invalide');
+      it.eleve_id = V.nombre(it.eleve_id, 'Identifiant élève', { min: 1, max: 2147483647, entier: true, required: true });
       const ok = await cl.query('SELECT 1 FROM eleves WHERE id=$1 AND classe_id=$2 AND deleted_at IS NULL', [it.eleve_id, ev.classe_id]);
       if (!ok.rowCount) throw new HttpError(400, "Élève hors de la classe de l'évaluation");
       const old = (await cl.query('SELECT * FROM notes WHERE evaluation_id=$1 AND eleve_id=$2 AND deleted_at IS NULL', [ev.id, it.eleve_id])).rows[0];
@@ -229,7 +232,8 @@ elevesExtra.post('/:id(\\d+)/auto-affectation', allow('admin', 'comptable'), ah(
 elevesExtra.get('/export', allow('admin', 'comptable'), ah(async (_req, res) => {
   const { rows } = await q(`SELECT e.matricule, e.nom, e.prenom, e.date_naissance, e.sexe, e.adresse, e.annee_entree, ${CLASSE_NOM('c')} AS classe, e.statut FROM eleves e LEFT JOIN classes c ON c.id=e.classe_id WHERE e.deleted_at IS NULL ORDER BY e.nom`);
   const cols = ['matricule', 'nom', 'prenom', 'date_naissance', 'sexe', 'adresse', 'annee_entree', 'classe', 'statut'];
-  const esc = (v) => (v === null || v === undefined ? '' : `"${String(v).replace(/"/g, '""')}"`);
+  // Une cellule qui commence par = + - @ (ou tabulation/retour chariot) serait exécutée comme une formule par Excel : on la préfixe d'une apostrophe
+  const esc = (v) => (v === null || v === undefined ? '' : `"${(/^[=+\-@\t\r]/.test(String(v)) ? "'" : '') + String(v).replace(/"/g, '""')}"`);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="eleves.csv"');
   res.send('\ufeff' + [cols.join(';'), ...rows.map((r) => cols.map((c) => esc(r[c])).join(';'))].join('\r\n'));
@@ -243,7 +247,7 @@ elevesExtra.post('/import', allow('admin', 'comptable'), memUpload.single('file'
   for (const [i, r] of recs.entries()) {
     try {
       r.nom = V.nomPropre(r.nom, 'nom'); r.prenom = V.nomPropre(r.prenom, 'prenom');
-      if (r.date_naissance) checkNaissance(r.date_naissance);
+      r.date_naissance = V.dateNaissance(r.date_naissance, 'date_naissance') || '';
       r.sexe = V.choix((r.sexe || '').toUpperCase() || null, 'sexe', ['M', 'F']) || '';
       r.adresse = V.texte(r.adresse, 'adresse', { max: 200 }) || '';
       r.annee_entree = V.annee(r.annee_entree, 'annee_entree') || '';
@@ -283,9 +287,8 @@ publicPre.post(['/preinscriptions', '/:slug/preinscriptions'], resoudreEcole, ah
   const need = ['eleve_nom', 'eleve_prenom', 'date_naissance', 'parent_nom', 'parent_prenom', 'parent_email'];
   const miss = need.filter((k) => !b[k]);
   if (miss.length) throw new HttpError(400, `Champs obligatoires : ${miss.join(', ')}`);
-  if (!b.consentement_rgpd) throw new HttpError(400, 'Le consentement parental est obligatoire (RGPD)');
-  Object.assign(b, V.preinscription(b)); // noms, e-mail, sexe, niveau, adresse, antécédents : contrôlés et nettoyés
-  checkNaissance(b.date_naissance);
+  if (b.consentement_rgpd !== true && b.consentement_rgpd !== 'true') throw new HttpError(400, 'Le consentement parental est obligatoire (RGPD)');
+  Object.assign(b, V.preinscription(b)); // noms, date de naissance, e-mail, sexe, niveau, adresse, antécédents : contrôlés et nettoyés
   checkTelephone(b.parent_telephone);
   const { rows } = await q(
     `INSERT INTO preinscriptions(annee_scolaire,eleve_nom,eleve_prenom,date_naissance,sexe,niveau_souhaite,parent_nom,parent_prenom,parent_email,parent_telephone,adresse,antecedents_medicaux,consentement_rgpd)
@@ -304,7 +307,6 @@ const pre = crud({
   async beforeSave({ data, isNew }) {
     if (isNew) data.consentement_rgpd = true;
     Object.assign(data, V.preinscription(data, { complet: false }));
-    if (data.date_naissance) checkNaissance(data.date_naissance);
     checkTelephone(data.parent_telephone);
   },
 });
@@ -315,11 +317,12 @@ preActions.post('/:id(\\d+)/valider', allow('admin', 'comptable'), ah(async (req
     if (!p) throw new HttpError(404, 'Pré-inscription introuvable ou déjà traitée');
     const parent = await trouverOuCreerParent(cl, { nom: p.parent_nom, prenom: p.parent_prenom, email: p.parent_email, telephone: p.parent_telephone }, { schoolId: req.user.school_id });
     let classe_id = null;
-    if (req.body.classe_id) {
-      const c = (await cl.query('SELECT capacite, (SELECT COUNT(*) FROM eleves e WHERE e.classe_id=c.id AND e.deleted_at IS NULL) n FROM classes c WHERE id=$1', [req.body.classe_id])).rows[0];
+    const choisie = V.nombre(req.body?.classe_id, 'La classe', { min: 1, max: 2147483647, entier: true });
+    if (choisie) {
+      const c = (await cl.query('SELECT capacite, (SELECT COUNT(*) FROM eleves e WHERE e.classe_id=c.id AND e.deleted_at IS NULL) n FROM classes c WHERE id=$1 AND deleted_at IS NULL', [choisie])).rows[0];
       if (!c) throw new HttpError(400, 'Classe introuvable');
       if (c.n >= c.capacite) throw new HttpError(409, 'Classe complète');
-      classe_id = req.body.classe_id;
+      classe_id = choisie;
     }
     const el = (await cl.query(
       'INSERT INTO eleves(nom,prenom,date_naissance,sexe,adresse,antecedents_medicaux,annee_entree,classe_id,email) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',
@@ -337,9 +340,10 @@ preActions.post('/:id(\\d+)/valider', allow('admin', 'comptable'), ah(async (req
   res.json({ ...rest, email_envoye: r.ok, erreur: r.ok ? null : r.error });
 }));
 preActions.post('/:id(\\d+)/refuser', allow('admin', 'comptable'), ah(async (req, res) => {
-  const r = await q("UPDATE preinscriptions SET statut='refusee', motif_refus=$1, traitee_par=$2 WHERE id=$3 AND statut='en_attente' RETURNING id", [req.body.motif || null, req.user.id, req.params.id]);
+  const motif = V.texte(req.body?.motif, 'Le motif du refus', { max: 300 });
+  const r = await q("UPDATE preinscriptions SET statut='refusee', motif_refus=$1, traitee_par=$2 WHERE id=$3 AND statut='en_attente' RETURNING id", [motif, req.user.id, req.params.id]);
   if (!r.rowCount) throw new HttpError(404, 'Pré-inscription introuvable ou déjà traitée');
-  await audit(null, req.user, 'refuse', 'preinscriptions', Number(req.params.id), null, { motif: req.body.motif });
+  await audit(null, req.user, 'refuse', 'preinscriptions', Number(req.params.id), null, { motif });
   res.json({ ok: true });
 }));
 

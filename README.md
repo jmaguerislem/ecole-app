@@ -140,3 +140,13 @@ Dockerfile, docker-compose.yml, .env.example
 ## Application mobile Flutter
 
 L'application mobile est désormais **native Flutter** (dossier `mobile/`, voir `mobile/README.md`). Compte rendu de la migration, décisions et limites : `MIGRATION_FLUTTER.md`.
+
+## E-mail (Gmail ou autre SMTP) et vérification
+
+Les e-mails servent à : identifiants des parents (mot de passe temporaire), **mot de passe oublié** (page `/mot-de-passe-oublie`), **confirmation de l'adresse à l'inscription d'une école** (page `/verifier-email`), annonces, absences, relances et reçus.
+
+1. Gmail : activez la validation en 2 étapes, puis créez un *mot de passe d'application* (compte Google → Sécurité). Dans `backend/.env` : `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_USER=vous@gmail.com`, `SMTP_PASS=<mot de passe d'application>`, `MAIL_FROM=vous@gmail.com`, `APP_URL=<adresse publique de l'application>`.
+2. Testez : `npm --prefix backend run mail:test` (connexion SMTP) puis `npm --prefix backend run mail:test -- vous@gmail.com` (envoie un e-mail de test).
+3. Sans SMTP configuré, l'application fonctionne : les e-mails ne partent pas (l'état est journalisé) et l'inscription d'une école n'exige pas de code. Avec SMTP, la confirmation par code est active (`VERIFY_SIGNUP_EMAIL=false` pour la désactiver).
+4. **Production** : `JWT_SECRET` obligatoire (`openssl rand -hex 32`) ; les valeurs d'exemple sont refusées. Les comptes créés avec les mots de passe d'exemple `ChangeMoi!…` doivent être changés à la première connexion.
+

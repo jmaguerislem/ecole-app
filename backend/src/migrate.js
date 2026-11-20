@@ -4,6 +4,9 @@ const bcrypt = require('bcryptjs');
 const { qa, end } = require('./db');
 const config = require('./config');
 
+// Mots de passe d'exemple publiés dans le dépôt : en production, un compte créé avec l'un d'eux doit être changé dès la première connexion
+const MDP_EXEMPLES = ['ChangeMoi!2026', 'ChangeMoi!2026Super'];
+const doitChanger = (pw) => config.prod && MDP_EXEMPLES.includes(pw);
 const sql = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
 const slugify = (s) => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'ecole';
 
@@ -44,15 +47,15 @@ async function migrate() {
 
   // Premier administrateur de l'école par défaut
   if (!(await qa("SELECT 1 FROM users WHERE role='admin' AND deleted_at IS NULL LIMIT 1")).rowCount && process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
-    await qa("INSERT INTO users(email,password_hash,role,nom,prenom,school_id) VALUES ($1,$2,'admin',$3,$4,$5) ON CONFLICT (email) DO NOTHING",
-      [process.env.ADMIN_EMAIL.toLowerCase(), await bcrypt.hash(process.env.ADMIN_PASSWORD, 12), process.env.ADMIN_NOM || 'Direction', process.env.ADMIN_PRENOM || 'École', school.id]);
+    await qa("INSERT INTO users(email,password_hash,role,nom,prenom,school_id,must_change_password) VALUES ($1,$2,'admin',$3,$4,$5,$6) ON CONFLICT (email) DO NOTHING",
+      [process.env.ADMIN_EMAIL.toLowerCase(), await bcrypt.hash(process.env.ADMIN_PASSWORD, 12), process.env.ADMIN_NOM || 'Direction', process.env.ADMIN_PRENOM || 'École', school.id, doitChanger(process.env.ADMIN_PASSWORD)]);
     console.log(`[migrate] Administrateur créé : ${process.env.ADMIN_EMAIL}`);
   }
   // Compte super-administrateur (propriétaire de la plateforme), séparé des directeurs d'école
   if (!(await qa("SELECT 1 FROM users WHERE role='superadmin' AND deleted_at IS NULL LIMIT 1")).rowCount) {
     if (process.env.SUPERADMIN_EMAIL && process.env.SUPERADMIN_PASSWORD) {
-      await qa("INSERT INTO users(email,password_hash,role,nom,prenom,school_id) VALUES ($1,$2,'superadmin','Plateforme','Super-administrateur',NULL) ON CONFLICT (email) DO NOTHING",
-        [process.env.SUPERADMIN_EMAIL.toLowerCase(), await bcrypt.hash(process.env.SUPERADMIN_PASSWORD, 12)]);
+      await qa("INSERT INTO users(email,password_hash,role,nom,prenom,school_id,must_change_password) VALUES ($1,$2,'superadmin','Plateforme','Super-administrateur',NULL,$3) ON CONFLICT (email) DO NOTHING",
+        [process.env.SUPERADMIN_EMAIL.toLowerCase(), await bcrypt.hash(process.env.SUPERADMIN_PASSWORD, 12), doitChanger(process.env.SUPERADMIN_PASSWORD)]);
       console.log(`[migrate] Super-administrateur créé : ${process.env.SUPERADMIN_EMAIL}`);
     } else console.warn('[migrate] Aucun super-administrateur : définissez SUPERADMIN_EMAIL et SUPERADMIN_PASSWORD pour gérer les écoles.');
   }

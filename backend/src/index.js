@@ -23,6 +23,7 @@ const bi = require('./routes/bi');
 const suivi = require('./routes/suivi');
 const A = require('./services/absences');
 const { listerEcoles } = require('./services/ecoles');
+const { supprimerUploads } = require('./services/storage');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -97,11 +98,18 @@ if (fs.existsSync(dist)) {
 }
 
 // ----- Gestion d'erreurs -----
-app.use((err, _req, res, _next) => {
+app.use(async (err, req, res, _next) => {
+  await supprimerUploads(req); // requête refusée : les fichiers déjà reçus ne doivent pas rester sur le disque
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, ...err.extra });
   if (err.code === '23505') return res.status(409).json({ error: 'Cet enregistrement existe déjà (doublon)' });
   if (err.code === '23503') return res.status(409).json({ error: 'Référence invalide ou enregistrement encore utilisé' });
-  if (err.code === '22P02' || err.code === '22007' || err.code === '23514' || err.code === '23502') return res.status(400).json({ error: 'Données invalides' });
+  // Valeurs refusées par PostgreSQL à cause de leur contenu (et non d'une panne) : 400 et non 500
+  //   22003 nombre hors limites · 22001 texte trop long · 22007/22008 date impossible · 22021/22P05 caractère interdit (NUL…) · 22P02 format · 22023 paramètre · 23502 champ vide · 23514 contrainte
+  if (err.code === '22003') return res.status(400).json({ error: 'Valeur numérique hors limites' });
+  if (err.code === '22001') return res.status(400).json({ error: 'Texte trop long' });
+  if (['22P02', '22007', '22008', '22021', '22P05', '22023', '23514', '23502'].includes(err.code)) return res.status(400).json({ error: 'Données invalides' });
+  if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Requête invalide (JSON mal formé)' });
+  if (err.type === 'entity.too.large') return res.status(413).json({ error: 'Requête trop volumineuse' });
   if (err.name === 'MulterError') return res.status(400).json({ error: `Fichier refusé : ${err.message}` });
   console.error(err);
   res.status(500).json({ error: 'Erreur interne du serveur' });

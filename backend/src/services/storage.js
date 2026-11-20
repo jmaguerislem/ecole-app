@@ -11,6 +11,28 @@ const { HttpError } = require('../util');
 fs.mkdirSync(config.uploadDir, { recursive: true });
 const ALLOWED = /^(application\/pdf|image\/(png|jpe?g|gif|webp)|text\/plain|application\/(msword|vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet|presentationml\.presentation)|vnd\.oasis\.opendocument\.text|vnd\.ms-excel))$/;
 
+// Extensions admises pour chaque type. L'extension du fichier stocké vient de cette liste : un « .html » ou « .svg » déclaré text/plain
+// serait sinon servi comme page web (script exécuté dans le site) lors de son ouverture.
+const MIME_EXT = {
+  'application/pdf': ['.pdf'], 'image/png': ['.png'], 'image/jpeg': ['.jpg', '.jpeg'], 'image/jpg': ['.jpg', '.jpeg'], 'image/gif': ['.gif'], 'image/webp': ['.webp'],
+  'text/plain': ['.txt'], 'application/msword': ['.doc'],
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
+  'application/vnd.oasis.opendocument.text': ['.odt'], 'application/vnd.ms-excel': ['.xls', '.csv'],
+};
+const extensionSure = (file) => {
+  const liste = MIME_EXT[file.mimetype]; if (!liste) return null;
+  const ext = path.extname(file.originalname || '').toLowerCase();
+  if (!ext) return liste[0]; // fichier sans extension : on lui donne celle de son type
+  return liste.includes(ext) ? ext : null;
+};
+// Supprime les fichiers reçus par multer quand la requête est finalement refusée (sinon ils resteraient orphelins sur le disque)
+const supprimerUploads = (req) => {
+  const fichiers = [...(req.file ? [req.file] : []), ...(Array.isArray(req.files) ? req.files : Object.values(req.files || {}).flat())];
+  return Promise.all(fichiers.map((f) => (f.path ? fs.promises.unlink(f.path).catch(() => {}) : null)));
+};
+
 // Chaque école a son dossier : uploads/<school_id>/
 const schoolDir = (schoolId) => path.join(config.uploadDir, String(schoolId));
 const raw = multer({
@@ -21,10 +43,10 @@ const raw = multer({
       fs.mkdirSync(dir, { recursive: true });
       cb(null, dir);
     },
-    filename: (_req, file, cb) => cb(null, crypto.randomBytes(16).toString('hex') + path.extname(file.originalname).toLowerCase().slice(0, 8)),
+    filename: (_req, file, cb) => cb(null, crypto.randomBytes(16).toString('hex') + (extensionSure(file) || '.bin')),
   }),
   limits: { fileSize: 10 * 1024 * 1024, files: 10 },
-  fileFilter: (_req, file, cb) => (ALLOWED.test(file.mimetype) ? cb(null, true) : cb(new HttpError(400, `Type de fichier non autorisé : ${file.originalname}`))),
+  fileFilter: (_req, file, cb) => (ALLOWED.test(file.mimetype) && extensionSure(file) ? cb(null, true) : cb(new HttpError(400, `Type de fichier non autorisé : ${Buffer.from(file.originalname || '', 'latin1').toString('utf8')} (l'extension ne correspond pas au type du fichier)`))),
 });
 // Photos : images uniquement, extension imposée par le type, signature du fichier vérifiée
 const IMG = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
@@ -76,4 +98,4 @@ const removeFile = (name) => {
   return fs.promises.unlink(path.join(schoolDir(school.schoolId), path.basename(name))).catch(() => {});
 };
 
-module.exports = { imageUpload, profilUpload, removePlatformFile, imageValide, photoExiste, upload, memUpload, fileInfo, filesInfo, removeFile };
+module.exports = { supprimerUploads, imageUpload, profilUpload, removePlatformFile, imageValide, photoExiste, upload, memUpload, fileInfo, filesInfo, removeFile };

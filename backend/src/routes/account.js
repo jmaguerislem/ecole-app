@@ -10,7 +10,8 @@ const { audit } = require('../audit');
 const { ah, HttpError } = require('../util');
 const config = require('../config');
 const V = require('../services/validate');
-const { definirMotDePasse, reinitialiser } = require('../services/invitations');
+const { definirMotDePasse, reinitialiser, envoyerCodeVerification, verifierEmail } = require('../services/invitations');
+const { mailerDisponible } = require('../services/mailer');
 
 const pub = express.Router(); // routes publiques
 const priv = express.Router(); // routes authentifiées
@@ -31,16 +32,44 @@ pub.post('/public/signup', ah(async (req, res) => {
   const nom = V.libelle(b.nom, "Le nom de l'école", { required: true, max: 120 });
   const email = V.email(b.email, "L'e-mail");
   const motDePasse = V.motDePasse(b.password, 'Le mot de passe');
-  if ((await qa('SELECT 1 FROM users WHERE email=$1', [email])).rowCount) throw new HttpError(409, 'Cette adresse e-mail est déjà utilisée');
-  let slug = slugify(nom);
-  for (let i = 2; (await qa('SELECT 1 FROM schools WHERE slug=$1', [slug])).rowCount; i++) slug = `${slugify(nom).slice(0, 36)}-${i}`;
-  const fin = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+  if (motDePasse.toLowerCase() === email) throw new HttpError(400, "Le mot de passe ne doit pas être identique à l'e-mail");
+  // Vérification de l'adresse (code reçu par e-mail) : active dès qu'un SMTP est configuré. Sans envoi possible, l'inscription reste ouverte comme avant.
+  const verification = config.verifierEmailInscription() && mailerDisponible();
+  const existant = (await qa('SELECT id, school_id, email_a_verifier FROM users WHERE email=$1 AND deleted_at IS NULL', [email])).rows[0];
   const hash = await bcrypt.hash(motDePasse, 12);
-  await txa(async (cl) => {
-    const s = (await cl.query("INSERT INTO schools(nom,slug,status,plan,subscription_end) VALUES ($1,$2,'trial','basic',$3) RETURNING id", [nom, slug, fin])).rows[0];
-    await cl.query("INSERT INTO users(email,password_hash,role,nom,prenom,school_id) VALUES ($1,$2,'admin','Direction','École',$3)", [email, hash, s.id]);
-  });
-  res.status(201).json({ ok: true, slug, essai_jusqu_au: fin });
+  // Une inscription jamais confirmée ne se connecte pas et ne contient aucune donnée : la même adresse peut la reprendre (évite qu'un tiers « réserve » l'adresse d'autrui)
+  if (existant && !(verification && existant.email_a_verifier)) throw new HttpError(409, 'Cette adresse e-mail est déjà utilisée');
+  const fin = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+  let userId; let slug;
+  if (existant) {
+    await qa('UPDATE users SET password_hash=$2 WHERE id=$1', [existant.id, hash]);
+    await qa('UPDATE schools SET nom=$2 WHERE id=$1', [existant.school_id, nom]);
+    userId = existant.id; slug = (await qa('SELECT slug FROM schools WHERE id=$1', [existant.school_id])).rows[0].slug;
+  } else {
+    slug = slugify(nom);
+    for (let i = 2; (await qa('SELECT 1 FROM schools WHERE slug=$1', [slug])).rowCount; i++) slug = `${slugify(nom).slice(0, 36)}-${i}`;
+    userId = await txa(async (cl) => {
+      const s = (await cl.query("INSERT INTO schools(nom,slug,status,plan,subscription_end) VALUES ($1,$2,'trial','basic',$3) RETURNING id", [nom, slug, fin])).rows[0];
+      return (await cl.query("INSERT INTO users(email,password_hash,role,nom,prenom,school_id,email_a_verifier) VALUES ($1,$2,'admin','Direction','École',$3,$4) RETURNING id", [email, hash, s.id, verification])).rows[0].id;
+    });
+  }
+  const rep = { ok: true, slug, essai_jusqu_au: fin };
+  if (verification) { const r = await envoyerCodeVerification(userId); Object.assign(rep, { verification_requise: true, email_envoye: r.ok, ...(r.ok ? {} : { erreur: r.error }) }); }
+  res.status(201).json(rep);
+}));
+
+// Confirmation de l'adresse e-mail d'une école inscrite en libre-service (code reçu par e-mail), puis renvoi d'un nouveau code
+pub.post('/public/verify-email', ah(async (req, res) => {
+  const { email, code } = req.body || {};
+  if ([email, code].some((v) => typeof v !== 'string' || !v.trim() || v.length > 200)) throw new HttpError(400, 'E-mail et code requis');
+  res.json(await verifierEmail({ email, code }));
+}));
+pub.post('/public/resend-verification', ah(async (req, res) => {
+  const { email } = req.body || {};
+  if (typeof email !== 'string' || email.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) throw new HttpError(400, 'Adresse e-mail invalide');
+  const u = (await qa('SELECT id FROM users WHERE email=$1 AND email_a_verifier AND actif AND deleted_at IS NULL', [email.toLowerCase().trim()])).rows[0];
+  if (u) await envoyerCodeVerification(u.id);
+  res.json({ ok: true, message: 'Si une inscription est en attente pour cette adresse, un nouveau code vient d\'être envoyé.' }); // même réponse dans tous les cas
 }));
 
 // Réponse de connexion (jeton + profil public). `u` = ligne users + school_nom/slug/ville. Partagée avec la connexion de démonstration (routes/demo.js).
@@ -64,6 +93,7 @@ pub.post('/auth/login', ah(async (req, res) => {
   const u = rows[0];
   const ok = u && u.actif && (await bcrypt.compare(password, u.password_hash));
   if (!ok) throw new HttpError(401, 'Identifiants incorrects');
+  if (u.email_a_verifier) throw new HttpError(403, "Votre adresse e-mail n'est pas encore confirmée. Saisissez le code reçu par e-mail.", { code: 'email_not_verified' });
   if (u.role !== 'superadmin') {
     const refus = abonnementBloque({ status: u.school_status, subscription_end: u.subscription_end });
     if (refus) throw new HttpError(403, refus);
@@ -81,7 +111,7 @@ pub.post('/auth/set-password', ah(async (req, res) => {
 }));
 pub.post('/auth/forgot-password', ah(async (req, res) => {
   const { email } = req.body || {};
-  if (typeof email !== 'string' || !email.includes('@') || email.length > 120) throw new HttpError(400, 'Adresse e-mail invalide');
+  if (typeof email !== 'string' || email.length > 120 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) throw new HttpError(400, 'Adresse e-mail invalide');
   await reinitialiser(email);
   res.json({ ok: true, message: 'Si un compte existe pour cette adresse, un e-mail contenant un code vient d\'être envoyé.' });
 }));
@@ -94,6 +124,7 @@ priv.post('/auth/change-password', ah(async (req, res) => {
   V.motDePasse(nouveau, 'Le nouveau mot de passe');
   if (confirmation !== undefined && confirmation !== nouveau) throw new HttpError(400, 'La confirmation ne correspond pas au nouveau mot de passe');
   if (nouveau === ancien) throw new HttpError(400, "Le nouveau mot de passe doit être différent de l'ancien");
+  if (nouveau.toLowerCase() === String(req.user.email).toLowerCase()) throw new HttpError(400, "Le mot de passe ne doit pas être identique à l'e-mail");
   const u = (await qa('SELECT password_hash FROM users WHERE id=$1', [req.user.id])).rows[0]; // propre compte (id issu de la session)
   if (!(await bcrypt.compare(ancien || '', u.password_hash))) throw new HttpError(400, 'Ancien mot de passe incorrect');
   await qa('UPDATE users SET password_hash=$1, mot_de_passe_defini=TRUE, must_change_password=FALSE WHERE id=$2', [await bcrypt.hash(nouveau, 12), req.user.id]);
@@ -115,7 +146,10 @@ priv.post('/notifications/:id(\\d+)/lu', ah(async (req, res) => { await q('UPDAT
 
 priv.post('/push/subscribe', ah(async (req, res) => {
   const { endpoint, keys } = req.body || {};
-  if (!endpoint || !keys) throw new HttpError(400, 'Abonnement invalide');
+  if (typeof endpoint !== 'string' || endpoint.length < 8 || endpoint.length > 1000 || /[\u0000-\u001F\u007F]/.test(endpoint) || !keys || typeof keys !== 'object' || Array.isArray(keys) || JSON.stringify(keys).length > 1000)
+    throw new HttpError(400, 'Abonnement invalide');
+  // Application mobile : « fcm:<jeton> » ; navigateur : adresse https du service de notification
+  if (!endpoint.startsWith('fcm:') && !/^https:\/\/[^\s]+$/.test(endpoint)) throw new HttpError(400, 'Abonnement invalide');
   if (!req.user.school_id) throw new HttpError(400, 'Notifications push indisponibles pour ce compte');
   await q('INSERT INTO push_subscriptions(user_id,endpoint,keys) VALUES ($1,$2,$3) ON CONFLICT (endpoint) DO UPDATE SET user_id=$1, keys=$3', [req.user.id, endpoint, JSON.stringify(keys)]);
   res.json({ ok: true });
@@ -124,7 +158,7 @@ priv.post('/push/subscribe', ah(async (req, res) => {
 // Déconnexion d'un appareil mobile : on retire son jeton pour qu'il ne reçoive plus les notifications de ce compte
 priv.post('/push/unsubscribe', ah(async (req, res) => {
   const { endpoint } = req.body || {};
-  if (!endpoint) throw new HttpError(400, 'Abonnement invalide');
+  if (typeof endpoint !== 'string' || !endpoint || endpoint.length > 1000 || /[\u0000-\u001F\u007F]/.test(endpoint)) throw new HttpError(400, 'Abonnement invalide');
   await q('DELETE FROM push_subscriptions WHERE endpoint=$1 AND user_id=$2', [endpoint, req.user.id]);
   res.json({ ok: true });
 }));
@@ -135,7 +169,14 @@ priv.get('/files/:name', (req, res) => {
   // Le super-administrateur n'a pas d'école : ses fichiers (photo de profil) sont dans uploads/platform/
   const dossier = req.user.school_id ? String(req.user.school_id) : req.user.role === 'superadmin' ? 'platform' : null;
   if (!dossier) return res.status(404).json({ error: 'Fichier introuvable' });
-  res.sendFile(path.join(config.uploadDir, dossier, path.basename(req.params.name)), (err) => { if (err && !res.headersSent) res.status(404).json({ error: 'Fichier introuvable' }); });
+  const nom = path.basename(req.params.name);
+  // Types affichables sans risque ; tout autre fichier (ancien « .html » par exemple) est servi comme simple téléchargement, jamais comme page web
+  if (!['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.txt'].includes(path.extname(nom).toLowerCase())) {
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment');
+  }
+  res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+  res.sendFile(path.join(config.uploadDir, dossier, nom), (err) => { if (err && !res.headersSent) res.status(404).json({ error: 'Fichier introuvable' }); });
 });
 
 // --- Journaux (admin) ---

@@ -119,7 +119,35 @@ async function definirMotDePasse({ email, code, password }) {
   if (!(a.length === b.length && crypto.timingSafeEqual(a, b))) { await qa('UPDATE password_setup_tokens SET essais=essais+1 WHERE id=$1', [t.id]); throw GENERIC; }
   V.motDePasse(password, 'Le mot de passe');
   if (String(password).toLowerCase() === mail) throw new HttpError(400, "Le mot de passe ne doit pas être identique à l'e-mail");
-  await qa('UPDATE users SET password_hash=$2, mot_de_passe_defini=TRUE, must_change_password=FALSE WHERE id=$1', [u.id, await bcrypt.hash(String(password), 12)]);
+  // Le code est arrivé dans la boîte du titulaire : l'adresse est de ce fait prouvée (un compte d'inscription en attente devient utilisable)
+  await qa('UPDATE users SET password_hash=$2, mot_de_passe_defini=TRUE, must_change_password=FALSE, email_a_verifier=FALSE WHERE id=$1', [u.id, await bcrypt.hash(String(password), 12)]);
+  await qa('UPDATE password_setup_tokens SET used_at=now() WHERE user_id=$1 AND used_at IS NULL', [u.id]);
+  return { ok: true };
+}
+
+// Inscription libre-service : e-mail contenant le code qui prouve que l'adresse appartient bien à la personne qui s'inscrit. Ne lève jamais d'exception.
+async function envoyerCodeVerification(userId) {
+  try {
+    const u = (await qa('SELECT u.id,u.email,u.prenom,u.nom,s.nom AS ecole FROM users u LEFT JOIN schools s ON s.id=u.school_id WHERE u.id=$1 AND u.email_a_verifier AND u.deleted_at IS NULL', [userId])).rows[0];
+    if (!u) return { ok: false, error: 'Compte introuvable' };
+    const code = await creerCode(u.id);
+    return await envoyerEmail({ to: u.email, subject: `[${config.plateformeNom}] Confirmez votre adresse e-mail`, text:
+      `Bonjour,\n\nVous venez de créer l'école « ${u.ecole} » sur ${config.plateformeNom}.\nPour confirmer que cette adresse e-mail est bien la vôtre, saisissez ce code (usage unique, valable ${VALIDITE_H} h) :\n\n  Code : ${formaterCode(code)}\n\nSaisissez-le sur ${config.appUrl}/verifier-email\nSi vous n'êtes pas à l'origine de cette inscription, ignorez ce message : aucun compte ne sera activé.\n` });
+  } catch (e) { console.error('[verification]', e.message); return { ok: false, error: 'Erreur interne lors de l\'envoi' }; }
+}
+
+// Confirme l'adresse avec le code reçu. Messages volontairement génériques (pas d'énumération de comptes).
+async function verifierEmail({ email, code }) {
+  const GENERIC = new HttpError(400, 'Code invalide ou expiré. Demandez un nouveau code.');
+  const mail = String(email || '').toLowerCase().trim();
+  const u = (await qa('SELECT id FROM users WHERE email=$1 AND email_a_verifier AND actif AND deleted_at IS NULL', [mail])).rows[0];
+  if (!u) throw GENERIC;
+  const t = (await qa('SELECT * FROM password_setup_tokens WHERE user_id=$1 AND used_at IS NULL AND expires_at>now() ORDER BY id DESC LIMIT 1', [u.id])).rows[0];
+  if (!t) throw GENERIC;
+  if (t.essais >= MAX_ESSAIS) { await qa('UPDATE password_setup_tokens SET used_at=now() WHERE id=$1', [t.id]); throw GENERIC; }
+  const a = Buffer.from(sha(code)); const b = Buffer.from(t.token_hash);
+  if (!(a.length === b.length && crypto.timingSafeEqual(a, b))) { await qa('UPDATE password_setup_tokens SET essais=essais+1 WHERE id=$1', [t.id]); throw GENERIC; }
+  await qa('UPDATE users SET email_a_verifier=FALSE WHERE id=$1', [u.id]);
   await qa('UPDATE password_setup_tokens SET used_at=now() WHERE user_id=$1 AND used_at IS NULL', [u.id]);
   return { ok: true };
 }
@@ -137,4 +165,4 @@ async function reinitialiser(email) {
   } catch (e) { console.error('[reinitialisation]', e.message); }
 }
 
-module.exports = { reinitialiser, trouverOuCreerParent, inviterParent, definirMotDePasse, creerCode, motDePasseTemporaire, VALIDITE_H };
+module.exports = { envoyerCodeVerification, verifierEmail, reinitialiser, trouverOuCreerParent, inviterParent, definirMotDePasse, creerCode, motDePasseTemporaire, VALIDITE_H };

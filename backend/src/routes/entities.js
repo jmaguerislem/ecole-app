@@ -43,6 +43,7 @@ const users = crud({
     if (isNew && !body.password) throw new HttpError(400, 'Mot de passe obligatoire');
     if (body.password) {
       V.motDePasse(body.password);
+      if (String(body.password).toLowerCase() === String(data.email ?? old?.email ?? '').toLowerCase()) throw new HttpError(400, "Le mot de passe ne doit pas être identique à l'e-mail");
       if (body.password_confirm !== undefined && body.password_confirm !== body.password) throw new HttpError(400, 'La confirmation du mot de passe ne correspond pas');
       data.password_hash = await bcrypt.hash(String(body.password), 12);
     }
@@ -230,7 +231,7 @@ const eleves = crud({
       body.parent_ids = ids;
       if (p.cree || !base.map(Number).includes(p.id)) req.invitationParent = { userId: p.id, cree: p.cree, tempPassword: p.motDePasseTemporaire || null };
     }
-    if (data.date_naissance) checkNaissance(data.date_naissance);
+    if (data.date_naissance !== undefined && data.date_naissance !== null) merged.date_naissance = data.date_naissance = V.dateNaissance(data.date_naissance, 'La date de naissance');
     if (data.classe_id && (!old || String(old.classe_id) !== String(data.classe_id))) {
       const c = (await client.query('SELECT capacite, (SELECT COUNT(*) FROM eleves e WHERE e.classe_id=c.id AND e.deleted_at IS NULL AND e.id<>$2) AS n FROM classes c WHERE c.id=$1 AND c.deleted_at IS NULL', [data.classe_id, old ? old.id : 0])).rows[0];
       if (!c) throw new HttpError(400, 'Classe introuvable');

@@ -1,11 +1,7 @@
-const nodemailer = require('nodemailer');
 const webpush = require('web-push');
 const { q, currentSchool } = require('../db');
 const config = require('../config');
-
-const mailer = config.smtp
-  ? nodemailer.createTransport({ host: config.smtp.host, port: config.smtp.port, secure: config.smtp.port === 465, auth: config.smtp.user ? { user: config.smtp.user, pass: config.smtp.pass } : undefined })
-  : null;
+const { envoyerEmail, mailerDisponible } = require('./mailer'); // un seul transport e-mail pour toute l'application (délais d'attente, mode test)
 if (config.vapid) webpush.setVapidDetails(config.vapid.subject, config.vapid.pub, config.vapid.priv);
 
 // Firebase Cloud Messaging (application mobile) : chargé uniquement si FIREBASE_SERVICE_ACCOUNT est défini
@@ -48,13 +44,11 @@ async function notify(userIds, { type, titre, corps, lien }, { email = false } =
       }
     }
   }
-  if (email && mailer && ids.length) {
+  if (email && mailerDisponible() && ids.length) {
     const users = (await q('SELECT id,email FROM users WHERE id = ANY($1) AND actif AND deleted_at IS NULL', [ids])).rows;
     for (const u of users) {
-      try {
-        await mailer.sendMail({ from: config.mailFrom, to: u.email, subject: `[${currentSchool()?.schoolNom || config.plateformeNom}] ${titre}`, text: `${corps || ''}\n\n${config.appUrl}${lien || ''}` });
-        await log(u.id, 'email', titre, 'envoye');
-      } catch (e) { await log(u.id, 'email', titre, 'echec', e.message); }
+      const r = await envoyerEmail({ to: u.email, subject: `[${currentSchool()?.schoolNom || config.plateformeNom}] ${titre}`, text: `${corps || ''}\n\n${config.appUrl}${lien || ''}` });
+      await log(u.id, 'email', titre, r.ok ? 'envoye' : 'echec', r.ok ? null : r.error);
     }
   }
 }

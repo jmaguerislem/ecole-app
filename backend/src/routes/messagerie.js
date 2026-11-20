@@ -232,7 +232,14 @@ devoirs.put('/:id(\\d+)', allow('admin', 'enseignant'), upload.array('fichiers',
   if (b.bareme !== undefined && b.bareme !== '') b.bareme = V.nombre(b.bareme, 'Le barème', { min: 1, max: 100, required: true });
   if (b.date_remise && new Date(b.date_remise).getTime() !== new Date(old.date_remise).getTime()) dateRemise(b.date_remise);
   let files = old.fichiers;
-  if (b.remove_files) { const rm = JSON.parse(b.remove_files); for (const n of rm) await removeFile(n); files = files.filter((f) => !rm.includes(f.name)); }
+  if (b.remove_files) {
+    let rm; try { rm = JSON.parse(b.remove_files); } catch { throw new HttpError(400, 'Liste des fichiers à retirer invalide'); }
+    if (!Array.isArray(rm) || rm.some((n) => typeof n !== 'string')) throw new HttpError(400, 'Liste des fichiers à retirer invalide');
+    const miens = new Set(files.map((f) => f.name));
+    const aRetirer = rm.filter((n) => miens.has(n)); // seuls les fichiers de CE devoir peuvent être supprimés (jamais ceux d'un autre devoir ou d'un message)
+    for (const n of aRetirer) await removeFile(n);
+    files = files.filter((f) => !aRetirer.includes(f.name));
+  }
   files = [...files, ...filesInfo(req.files)];
   const d = (await q(`UPDATE devoirs SET titre=$1, description=$2, date_remise=$3, bareme=$4, fichiers=$5 WHERE id=$6 RETURNING *`,
     [b.titre || old.titre, b.description ?? old.description, b.date_remise || old.date_remise, b.bareme || old.bareme, JSON.stringify(files), old.id])).rows[0];
