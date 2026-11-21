@@ -30,7 +30,8 @@ async function call(token, method, url, body, form) {
   return { status: res.status, data, ct };
 }
 const must = async (token, method, url, body, form) => { const r = await call(token, method, url, body, form); assert.ok(r.status < 300, `${method} ${url} -> ${r.status} ${JSON.stringify(r.data).slice(0, 200)}`); return r.data; };
-const login = async (email) => (await must(null, 'POST', '/api/auth/login', { email, password: PW })).token;
+// Les comptes créés par l'administrateur doivent changer leur mot de passe provisoire : les tests lèvent cette obligation pour exercer le reste de l'API
+const login = async (email) => { const r = await must(null, 'POST', '/api/auth/login', { email, password: PW }); if (r.user.must_change_password) await db.qa('UPDATE users SET must_change_password=FALSE WHERE id=$1', [r.user.id]); return r.token; };
 const refuse = (r, msg) => assert.ok([400, 403, 404, 409].includes(r.status), `${msg} : attendu refus, reçu ${r.status} ${JSON.stringify(r.data).slice(0, 120)}`);
 const sens = [['A', 'B'], ['B', 'A']];
 
@@ -209,9 +210,17 @@ test('matricule : même valeur autorisée dans deux écoles, interdite dans la m
   }
 });
 
-test('e-mail : unique dans toute la base (connexion sans choix d\'école)', async () => {
-  const r = await call(S.B.admin, 'POST', '/api/users', { nom: 'Copie', prenom: 'Parent', email: `par-A-${stamp}@test.tn`, role: 'parent', password: PW });
-  assert.ok([409, 400].includes(r.status));
+test('e-mail : unique PAR ÉCOLE — la même adresse est acceptée dans une autre école, refusée dans la même', async () => {
+  const mail = `par-A-${stamp}@test.tn`; const autrePw = 'Copie@2026Zz1';
+  const r = await call(S.B.admin, 'POST', '/api/users', { nom: 'Copie', prenom: 'Parent', email: mail, role: 'parent', password: autrePw });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  const doublon = await call(S.B.admin, 'POST', '/api/users', { nom: 'Copie', prenom: 'Bis', email: mail, role: 'parent', password: autrePw });
+  assert.equal(doublon.status, 409); assert.match(doublon.data.error, /déjà utilisée par un compte de cette école/);
+  const dansA = await call(S.A.admin, 'POST', '/api/users', { nom: 'Copie', prenom: 'Ter', email: mail, role: 'parent', password: PW });
+  assert.equal(dansA.status, 409, 'doublon dans la même école refusé');
+  // chaque compte se connecte avec son mot de passe, dans SA école
+  assert.equal((await call(null, 'POST', '/api/auth/login', { email: mail, password: autrePw })).data.user.school.id, S.B.id);
+  assert.equal((await call(null, 'POST', '/api/auth/login', { email: mail, password: PW })).data.user.school.id, S.A.id);
 });
 
 test('super-administrateur : voit les écoles mais aucune donnée d\'école ; la direction ne gère pas les écoles', async () => {

@@ -8,7 +8,7 @@ const A = require('../services/absences');
 const V = require('../services/validate');
 const { verifierQuota } = require('../services/quotas');
 const { genererEmailEleve } = require('../services/emailEleve');
-const { trouverOuCreerParent, inviterParent } = require('../services/invitations');
+const { trouverOuCreerParent, inviterParent, envoyerIdentifiants } = require('../services/invitations');
 const { assurerTarifsAnnee, historiser } = require('../services/tarifs');
 const { photoExiste, removeFile, imageUpload, imageValide } = require('../services/storage');
 const express = require('express');
@@ -37,7 +37,7 @@ const users = crud({
     if (data.specialite !== undefined) data.specialite = V.texte(data.specialite, 'La spécialité', { max: 80, re: /^[\p{L}\p{N}][\p{L}\p{N}\p{M} '’.,&()/+-]*$/u, reMsg: 'La spécialité : caractères non autorisés' });
     if (isNew || data.email !== undefined) {
       data.email = V.email(data.email);
-      if ((await client.query('SELECT 1 FROM users WHERE email=$1 AND id<>$2', [data.email, old?.id || 0])).rowCount) throw new HttpError(409, 'Cette adresse e-mail est déjà utilisée');
+      if ((await client.query('SELECT 1 FROM users WHERE email=$1 AND id<>$2 AND deleted_at IS NULL', [data.email, old?.id || 0])).rowCount) throw new HttpError(409, 'Cette adresse e-mail est déjà utilisée par un compte de cette école'); // la sécurité par école (RLS) limite déjà la recherche à l'école courante
     }
     if (data.role && !['admin', 'enseignant', 'parent', 'eleve', 'comptable'].includes(data.role)) throw new HttpError(400, 'Rôle invalide');
     if (isNew && !body.password) throw new HttpError(400, 'Mot de passe obligatoire');
@@ -46,10 +46,18 @@ const users = crud({
       if (String(body.password).toLowerCase() === String(data.email ?? old?.email ?? '').toLowerCase()) throw new HttpError(400, "Le mot de passe ne doit pas être identique à l'e-mail");
       if (body.password_confirm !== undefined && body.password_confirm !== body.password) throw new HttpError(400, 'La confirmation du mot de passe ne correspond pas');
       data.password_hash = await bcrypt.hash(String(body.password), 12);
+      // Compte créé par l'administrateur : le mot de passe saisi est PROVISOIRE (connu de l'administrateur et envoyé par e-mail) → changement obligatoire à la première connexion
+      if (isNew && data.role !== 'eleve') { data.must_change_password = true; data.mot_de_passe_defini = true; }
     }
     if (!isNew && old.id === user.id && (data.actif === false || (data.role && data.role !== old.role)))
       throw new HttpError(400, 'Vous ne pouvez pas désactiver votre compte ni modifier votre rôle');
     if (isNew && data.role === 'parent') data.consentement_rgpd_at = new Date();
+  },
+  // E-mail de confirmation (identifiant + mot de passe provisoire) après validation de la transaction : un échec d'envoi n'annule jamais la création
+  async afterCommitSync({ isNew, row, body, req }) {
+    if (!isNew || row.role === 'eleve') return null;
+    const r = await envoyerIdentifiants({ userId: row.id, ecole: req.school?.label || req.school?.nom || 'École', motDePasse: String(body.password) });
+    return { email_envoye: r.ok, ...(r.ok ? {} : { email_erreur: r.error }) };
   },
   deleteChecks: [
     { sql: refCount('affectations WHERE enseignant_id=$1 AND deleted_at IS NULL'), message: "Cet enseignant a des affectations matière/classe : supprimez-les d'abord." },

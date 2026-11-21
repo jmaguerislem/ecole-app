@@ -167,7 +167,7 @@ async function documenter(hash) {
 async function main() {
   await migrate();
   const hash = await bcrypt.hash(PW, 10);
-  await qa("INSERT INTO users(email,password_hash,role,nom,prenom,school_id) VALUES ('super@ecole.tn',$1,'superadmin','Plateforme','Super-administrateur',NULL) ON CONFLICT (email) DO NOTHING", [hash]);
+  await qa("INSERT INTO users(email,password_hash,role,nom,prenom,school_id) VALUES ('super@ecole.tn',$1,'superadmin','Plateforme','Super-administrateur',NULL) ON CONFLICT DO NOTHING", [hash]);
   for (const [i, e] of ECOLES.entries()) {
     const ex = (await qa('SELECT id FROM schools WHERE slug=$1', [e.slug])).rows[0];
     if (ex && (await qa('SELECT 1 FROM users WHERE school_id=$1 LIMIT 1', [ex.id])).rowCount) { console.log(`[seed-ecoles] ${e.nom} : déjà présente, ignorée.`); continue; }

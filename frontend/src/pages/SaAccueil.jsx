@@ -17,12 +17,18 @@ export default function SaAccueil() {
   if (err && !d) return <Alert>{err}</Alert>;
   if (!d) return <Spinner />;
   const T = d.totaux;
+  const inscr = d.inscriptions_recentes || [];
   return (
     <div>
       <PageHeader title="Accueil" subtitle="Vue d'ensemble de la plateforme, calculée en direct à partir de la base de données.">
         <span className="live" role="status"><span className="live-dot" aria-hidden="true" />{maj ? `Mis à jour à ${maj.toLocaleTimeString('fr-FR')}` : 'Chargement…'}</span>
         <button type="button" className="btn sec sm" onClick={reload}>Actualiser</button>
       </PageHeader>
+      {inscr.length > 0 && <Alert kind="ok">
+        <b>{inscr.length} nouvelle{inscr.length > 1 ? 's' : ''} école{inscr.length > 1 ? 's' : ''} inscrite{inscr.length > 1 ? 's' : ''} ces 30 derniers jours</b>
+        <ul style={{ margin: '.4rem 0 0', paddingLeft: '1.2rem' }}>{inscr.map((x) => <li key={x.id}>{x.nom} — {x.email} ({x.email_confirme ? 'adresse confirmée' : 'adresse non vérifiée'}) · {new Date(x.created_at).toLocaleDateString('fr-FR')}</li>)}</ul>
+        <Link to="/ecoles">Voir les écoles</Link>
+      </Alert>}
       <Alert>{err}</Alert>
 
       <div className="grid">

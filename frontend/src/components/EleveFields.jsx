@@ -49,7 +49,7 @@ export const verifierMotsDePasse = (form, row) => {
   return null;
 };
 export const PASSWORD_FIELDS = [
-  { name: 'password', label: 'Mot de passe', type: 'password', requiredOnCreate: true, help: 'Laisser vide pour ne pas changer. 8 caractères minimum, avec une lettre et un chiffre.', ...MOT_DE_PASSE },
+  { name: 'password', label: 'Mot de passe', type: 'password', requiredOnCreate: true, help: 'Mot de passe provisoire : il est envoyé par e-mail à la personne, qui devra le changer à sa première connexion. En modification, laisser vide pour ne pas changer. 8 caractères minimum, avec une lettre et un chiffre.', ...MOT_DE_PASSE },
   { name: 'password_confirm', label: 'Confirmer le mot de passe', type: 'password', confirmOf: 'password', render: (p) => <PasswordConfirmField {...p} /> },
 ];
 

@@ -101,7 +101,7 @@ if (fs.existsSync(dist)) {
 app.use(async (err, req, res, _next) => {
   await supprimerUploads(req); // requête refusée : les fichiers déjà reçus ne doivent pas rester sur le disque
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, ...err.extra });
-  if (err.code === '23505') return res.status(409).json({ error: 'Cet enregistrement existe déjà (doublon)' });
+  if (err.code === '23505') return res.status(409).json({ error: ['uq_users_ecole_email', 'uq_users_plateforme_email'].includes(err.constraint) ? 'Cette adresse e-mail est déjà utilisée par un compte de cette école' : 'Cet enregistrement existe déjà (doublon)' });
   if (err.code === '23503') return res.status(409).json({ error: 'Référence invalide ou enregistrement encore utilisé' });
   // Valeurs refusées par PostgreSQL à cause de leur contenu (et non d'une panne) : 400 et non 500
   //   22003 nombre hors limites · 22001 texte trop long · 22007/22008 date impossible · 22021/22P05 caractère interdit (NUL…) · 22P02 format · 22023 paramètre · 23502 champ vide · 23514 contrainte

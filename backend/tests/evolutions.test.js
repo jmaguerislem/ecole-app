@@ -84,7 +84,7 @@ test('tarifs : prix par niveau, +50 DT/an automatique, historique conservé', as
 test('annonces : destinataires personnalisés, élèves, enseignants, parents', async () => {
   const mk = async (role, n) => (await call(admin, 'POST', '/api/users', { nom: 'Dupont', prenom: 'Test', email: `${n}-${stamp}@evo.test`, role, password: PW, password_confirm: PW })).data;
   const p = await mk('parent', 'par'); const e = await mk('enseignant', 'ens'); const p2 = await mk('parent', 'parb');
-  const tok = async (n) => (await call(null, 'POST', '/api/auth/login', { email: `${n}-${stamp}@evo.test`, password: PW })).data.token;
+  const tok = async (n) => { const l = await call(null, 'POST', '/api/auth/login', { email: `${n}-${stamp}@evo.test`, password: PW }); if (l.data.user?.must_change_password) await db.qa('UPDATE users SET must_change_password=FALSE WHERE id=$1', [l.data.user.id]); return l.data.token; };
   assert.equal((await call(admin, 'POST', '/api/annonces', { titre: 'Perso', corps: 'abc', audience: 'personne', destinataire_ids: [] })).status, 400);
   assert.equal((await call(admin, 'POST', '/api/annonces', { titre: 'Perso', corps: 'abc', audience: 'personne', destinataire_ids: [999999] })).status, 400);
   { const ok = await call(admin, 'POST', '/api/annonces', { titre: 'Perso', corps: 'abc', audience: 'personne', destinataire_ids: [p.id] }); assert.equal(ok.status, 201, JSON.stringify(ok.data)); }
@@ -109,7 +109,7 @@ test('mot de passe : confirmation vérifiée côté serveur', async () => {
 // ---- « Faire l'appel » : réservé aux enseignants (jamais le directeur), uniquement dans leurs classes ----
 test("appel : refusé au directeur, au comptable, aux parents et élèves ; autorisé à l'enseignant dans ses classes seulement", async () => {
   const mk = async (role, n) => (await call(admin, 'POST', '/api/users', { nom: 'Dupont', prenom: 'Test', email: `${n}-${stamp}@evo.test`, role, password: PW, password_confirm: PW })).data;
-  const tok = async (n) => (await call(null, 'POST', '/api/auth/login', { email: `${n}-${stamp}@evo.test`, password: PW })).data.token;
+  const tok = async (n) => { const l = await call(null, 'POST', '/api/auth/login', { email: `${n}-${stamp}@evo.test`, password: PW }); if (l.data.user?.must_change_password) await db.qa('UPDATE users SET must_change_password=FALSE WHERE id=$1', [l.data.user.id]); return l.data.token; };
   const ens = await mk('enseignant', 'appelens'); await mk('comptable', 'appelcpt'); await mk('parent', 'appelpar');
   const classe = (await call(admin, 'POST', '/api/classes', { niveau: '1ère année', section: 'Z', capacite: 25 })).data;
   const autre = (await call(admin, 'POST', '/api/classes', { niveau: '2ème année', section: 'Z', capacite: 25 })).data;

@@ -10,7 +10,7 @@ async function seed() {
   const pw = process.env.SEED_PASSWORD || 'Demo@2026!';
   const hash = await bcrypt.hash(pw, 10);
   const user = async (email, role, nom, prenom, extra = {}) =>
-    (await q(`INSERT INTO users(email,password_hash,role,nom,prenom,telephone,specialite) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (email) DO UPDATE SET nom=EXCLUDED.nom, password_hash=EXCLUDED.password_hash RETURNING id`,
+    (await q(`INSERT INTO users(email,password_hash,role,nom,prenom,telephone,specialite) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (school_id, email) WHERE school_id IS NOT NULL AND deleted_at IS NULL DO UPDATE SET nom=EXCLUDED.nom, password_hash=EXCLUDED.password_hash RETURNING id`,
       [email, hash, role, nom, prenom, extra.tel || null, extra.spec || null])).rows[0].id;
   const admin = await user('admin@ecole.tn', 'admin', 'Direction', 'École');
   const compta = await user('compta@ecole.tn', 'comptable', 'Ben Ali', 'Sonia');
@@ -56,7 +56,7 @@ async function seed() {
   await migrate();
   const school = (await qa('SELECT id, nom FROM schools ORDER BY id LIMIT 1')).rows[0];
   const hash = await bcrypt.hash(process.env.SEED_PASSWORD || 'Demo@2026!', 10);
-  await qa("INSERT INTO users(email,password_hash,role,nom,prenom,school_id) VALUES ('super@ecole.tn',$1,'superadmin','Plateforme','Super-administrateur',NULL) ON CONFLICT (email) DO NOTHING", [hash]);
+  await qa("INSERT INTO users(email,password_hash,role,nom,prenom,school_id) VALUES ('super@ecole.tn',$1,'superadmin','Plateforme','Super-administrateur',NULL) ON CONFLICT DO NOTHING", [hash]);
   await runWith({ schoolId: school.id, schoolNom: school.nom }, seed);
 })().catch((e) => { console.error(e); process.exitCode = 1; }).finally(() => end());
 

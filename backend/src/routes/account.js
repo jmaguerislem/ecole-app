@@ -10,7 +10,7 @@ const { audit } = require('../audit');
 const { ah, HttpError } = require('../util');
 const config = require('../config');
 const V = require('../services/validate');
-const { definirMotDePasse, reinitialiser, envoyerCodeVerification, verifierEmail } = require('../services/invitations');
+const { definirMotDePasse, reinitialiser, envoyerCodeVerification, verifierEmail, notifierNouvelleEcole } = require('../services/invitations');
 const { mailerDisponible } = require('../services/mailer');
 
 const pub = express.Router(); // routes publiques
@@ -35,10 +35,10 @@ pub.post('/public/signup', ah(async (req, res) => {
   if (motDePasse.toLowerCase() === email) throw new HttpError(400, "Le mot de passe ne doit pas être identique à l'e-mail");
   // Vérification de l'adresse (code reçu par e-mail) : active dès qu'un SMTP est configuré. Sans envoi possible, l'inscription reste ouverte comme avant.
   const verification = config.verifierEmailInscription() && mailerDisponible();
-  const existant = (await qa('SELECT id, school_id, email_a_verifier FROM users WHERE email=$1 AND deleted_at IS NULL', [email])).rows[0];
   const hash = await bcrypt.hash(motDePasse, 12);
+  // L'e-mail n'est unique que dans une école : une adresse déjà utilisée ailleurs ne bloque pas l'inscription d'une nouvelle école.
   // Une inscription jamais confirmée ne se connecte pas et ne contient aucune donnée : la même adresse peut la reprendre (évite qu'un tiers « réserve » l'adresse d'autrui)
-  if (existant && !(verification && existant.email_a_verifier)) throw new HttpError(409, 'Cette adresse e-mail est déjà utilisée');
+  const existant = verification ? (await qa("SELECT id, school_id FROM users WHERE email=$1 AND email_a_verifier AND role='admin' AND deleted_at IS NULL ORDER BY id DESC LIMIT 1", [email])).rows[0] : null;
   const fin = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
   let userId; let slug;
   if (existant) {
@@ -55,6 +55,7 @@ pub.post('/public/signup', ah(async (req, res) => {
   }
   const rep = { ok: true, slug, essai_jusqu_au: fin };
   if (verification) { const r = await envoyerCodeVerification(userId); Object.assign(rep, { verification_requise: true, email_envoye: r.ok, ...(r.ok ? {} : { erreur: r.error }) }); }
+  else await notifierNouvelleEcole(userId, { confirme: false }); // sans vérification d'e-mail : le super-administrateur est prévenu tout de suite (sinon, une fois l'adresse confirmée)
   res.status(201).json(rep);
 }));
 
@@ -83,16 +84,22 @@ const reponseConnexion = (u) => ({
 });
 
 pub.post('/auth/login', ah(async (req, res) => {
-  const { email, password } = req.body || {};
+  const { email, password, school } = req.body || {};
   if (!email || !password) throw new HttpError(400, 'E-mail et mot de passe requis');
   if (typeof email !== 'string' || typeof password !== 'string' || email.length > 120 || password.length > 128) throw new HttpError(400, 'E-mail ou mot de passe invalide');
-  // La connexion n'a pas encore d'école : on retrouve le compte par son e-mail (unique dans toute la base)
+  if (school !== undefined && school !== null && (typeof school !== 'string' || school.length > 60)) throw new HttpError(400, 'École invalide');
+  // Une même adresse peut exister dans plusieurs écoles (l'e-mail n'est unique que dans une école) : on retient les comptes dont le mot de passe correspond.
+  // L'école n'est demandée que si plusieurs comptes correspondent à la fois (même adresse ET même mot de passe).
   const { rows } = await qa(
     `SELECT u.*, s.nom AS school_nom, s.slug AS school_slug, s.ville AS school_ville, s.status AS school_status, s.subscription_end
-     FROM users u LEFT JOIN schools s ON s.id=u.school_id WHERE u.email=$1 AND u.deleted_at IS NULL`, [String(email).toLowerCase().trim()]);
-  const u = rows[0];
-  const ok = u && u.actif && (await bcrypt.compare(password, u.password_hash));
-  if (!ok) throw new HttpError(401, 'Identifiants incorrects');
+     FROM users u LEFT JOIN schools s ON s.id=u.school_id WHERE u.email=$1 AND u.deleted_at IS NULL AND u.actif ORDER BY u.id LIMIT 10`, [String(email).toLowerCase().trim()]);
+  const PLATEFORME = '__plateforme'; // identifiant du compte propriétaire de la plateforme (sans école) dans le sélecteur
+  const candidats = rows.filter((r) => !school || (r.school_slug || PLATEFORME) === school);
+  const valides = [];
+  for (const c of candidats) if (await bcrypt.compare(password, c.password_hash)) valides.push(c);
+  if (!valides.length) throw new HttpError(401, 'Identifiants incorrects');
+  if (valides.length > 1) throw new HttpError(409, 'Cette adresse est utilisée dans plusieurs écoles : choisissez votre école.', { code: 'school_required', ecoles: valides.map((c) => ({ slug: c.school_slug || PLATEFORME, nom: c.school_slug ? (c.school_ville ? `${c.school_nom} (${c.school_ville})` : c.school_nom) : 'Administration de la plateforme' })) });
+  const u = valides[0];
   if (u.email_a_verifier) throw new HttpError(403, "Votre adresse e-mail n'est pas encore confirmée. Saisissez le code reçu par e-mail.", { code: 'email_not_verified' });
   if (u.role !== 'superadmin') {
     const refus = abonnementBloque({ status: u.school_status, subscription_end: u.subscription_end });

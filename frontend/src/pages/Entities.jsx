@@ -54,6 +54,13 @@ export const Affectations = () => <CrudPage title="Affectations enseignant ↔ m
   columns={[{ key: 'enseignant_nom', label: 'Enseignant' }, { key: 'matiere_nom', label: 'Matière' }, { key: 'classe_nom', label: 'Classe' }, { key: 'annee_scolaire', label: 'Année' }]}
   fields={[{ name: 'enseignant_id', label: 'Enseignant', type: 'select', optionsFrom: opt.prof, required: true }, { name: 'matiere_id', label: 'Matière', type: 'select', optionsFrom: opt.matiere, required: true }, { name: 'classe_id', label: 'Classe', type: 'select', optionsFrom: opt.classe, required: true }]} />;
 
+// Message affiché après l'ajout d'un compte : l'e-mail (identifiant + mot de passe provisoire) est envoyé automatiquement par le serveur
+const messageCompte = (res, edition) => {
+  if (edition || res?.email_envoye === undefined) return edition ? 'Modification enregistrée.' : 'Compte créé.';
+  return res.email_envoye
+    ? `Compte créé. Un e-mail contenant l'identifiant et le mot de passe provisoire a été envoyé à ${res.email} : la personne devra choisir son mot de passe à sa première connexion.`
+    : `Compte créé, mais l'e-mail n'a pas pu être envoyé (${res.email_erreur || 'erreur inconnue'}). Communiquez vous-même l'identifiant (${res.email}) et le mot de passe provisoire à la personne : elle devra le changer à sa première connexion.`;
+};
 const userFields = (extra = []) => [
   { name: 'nom', label: 'Nom', required: true, ...NOM }, { name: 'prenom', label: 'Prénom', required: true, ...NOM }, { name: 'email', label: 'E-mail (identifiant)', type: 'email', required: true, ...EMAIL },
   { name: 'telephone', label: 'Téléphone', ...TEL }, ...extra,
@@ -62,7 +69,7 @@ const userFields = (extra = []) => [
 ];
 const userCols = [{ key: 'nom_complet', label: 'Nom' }, { label: 'E-mail', render: (r) => <EmailCell email={r.email} /> }, { key: 'telephone', label: 'Téléphone' }, { label: 'Statut', render: (r) => <Pill kind={r.actif ? 'ok' : ''}>{r.actif ? 'Actif' : 'Inactif'}</Pill> }];
 export function Enseignants() {
-  return <CrudPage title="Enseignants" endpoint="/users" query={{ role: 'enseignant' }} columns={[...userCols, { key: 'specialite', label: 'Spécialité' }]} fields={userFields([{ name: 'specialite', label: 'Spécialité', maxLength: 80 }])} transformBody={(b) => ({ ...b, role: 'enseignant' })} validate={verifierMotsDePasse} />;
+  return <CrudPage title="Enseignants" endpoint="/users" query={{ role: 'enseignant' }} columns={[...userCols, { key: 'specialite', label: 'Spécialité' }]} fields={userFields([{ name: 'specialite', label: 'Spécialité', maxLength: 80 }])} transformBody={(b) => ({ ...b, role: 'enseignant' })} validate={verifierMotsDePasse} successMessage={messageCompte} />;
 }
 export function Parents() {
   const { user } = useAuth();
@@ -72,9 +79,9 @@ export function Parents() {
     try { const x = await api(`/users/${r.id}/renvoyer-invitation`, { method: 'POST' }); if (x.email_envoye) { setError(''); setInfo(`E-mail envoyé à ${r.email}.`); } else { setInfo(''); setError(`L'e-mail n'a pas pu être envoyé (${x.erreur || 'erreur inconnue'}).`); } reload(); } catch (e) { setInfo(''); setError(e.message); }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
-  return <CrudPage title="Parents" endpoint="/users" query={{ role: 'parent' }} canWrite={isAdmin(user)} columns={[...userCols, { label: 'Accès', render: (r) => (r.must_change_password ? <Pill kind="warn">{r.invitation_erreur ? 'E-mail non envoyé' : 'Mot de passe temporaire'}</Pill> : <Pill kind="ok">Activé</Pill>) }]} rowActions={(r, reload, h) => isAdmin(user) && r.must_change_password && <button className="btn sec sm" onClick={() => renvoyer(r, reload, h)}>Renvoyer l'invitation</button>} fields={userFields()} transformBody={(b) => ({ ...b, role: 'parent' })} validate={verifierMotsDePasse} />;
+  return <CrudPage title="Parents" endpoint="/users" query={{ role: 'parent' }} canWrite={isAdmin(user)} columns={[...userCols, { label: 'Accès', render: (r) => (r.must_change_password ? <Pill kind="warn">{r.invitation_erreur ? 'E-mail non envoyé' : 'Mot de passe temporaire'}</Pill> : <Pill kind="ok">Activé</Pill>) }]} rowActions={(r, reload, h) => isAdmin(user) && r.must_change_password && <button className="btn sec sm" onClick={() => renvoyer(r, reload, h)}>Renvoyer l'invitation</button>} fields={userFields()} transformBody={(b) => ({ ...b, role: 'parent' })} validate={verifierMotsDePasse} successMessage={messageCompte} />;
 }
-export const Comptes = () => <CrudPage title="Tous les comptes" endpoint="/users" columns={[...userCols, { label: 'Rôle', render: (r) => <Pill>{ROLES[r.role] || r.role}</Pill> }]} validate={verifierMotsDePasse} wideModal
+export const Comptes = () => <CrudPage title="Tous les comptes" endpoint="/users" columns={[...userCols, { label: 'Rôle', render: (r) => <Pill>{ROLES[r.role] || r.role}</Pill> }]} validate={verifierMotsDePasse} successMessage={messageCompte} wideModal
   fields={userFields([{ name: 'role', label: 'Rôle', type: 'select', required: true, options: [['admin', 'Administrateur'], ['enseignant', 'Enseignant'], ['parent', 'Parent'], ['eleve', 'Élève'], ['comptable', 'Comptable / Secrétariat']].map(([value, label]) => ({ value, label })) }])} />;
 
 export function Eleves() {

@@ -410,6 +410,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS mot_de_passe_defini BOOLEAN NOT NULL 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
 -- Compte créé par l'inscription libre-service tant que son adresse e-mail n'a pas été confirmée par un code reçu dans la boîte (connexion refusée)
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email_a_verifier BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Photo de profil (nom de fichier servi par /api/files/…, rangé dans uploads/<école>/ ou uploads/platform/ pour le super-administrateur)
 ALTER TABLE users ADD COLUMN IF NOT EXISTS photo TEXT;
 ALTER TABLE schools ADD COLUMN IF NOT EXISTS subscription_start DATE;

@@ -74,6 +74,14 @@ END $$;
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_school_role_check;
 ALTER TABLE users ADD CONSTRAINT users_school_role_check CHECK ((role = 'superadmin') = (school_id IS NULL));
 
+-- E-mail unique PAR ÉCOLE (et non plus dans toute la plateforme) : une adresse déjà utilisée dans une autre école, ou par un compte supprimé, n'empêche pas de créer
+-- le compte dans une école. Seuls les doublons au sein d'une même école sont refusés. Les adresses sont toujours enregistrées en minuscules.
+-- (Règle strictement moins contraignante que l'ancienne « UNIQUE (email) » : la création des index ne peut pas échouer sur des données existantes.)
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_users_ecole_email ON users (school_id, email) WHERE school_id IS NOT NULL AND deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_users_plateforme_email ON users (email) WHERE school_id IS NULL AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
+
 -- 6) Unicité PAR ÉCOLE (et non dans toute la base) : matricule des élèves, numéro de reçu
 DROP INDEX IF EXISTS uq_eleves_matricule;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_eleves_matricule_school ON eleves(school_id, matricule) WHERE matricule IS NOT NULL AND deleted_at IS NULL;

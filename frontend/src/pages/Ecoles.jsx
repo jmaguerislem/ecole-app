@@ -17,6 +17,7 @@ export default function Ecoles() {
   const [filtre, setFiltre] = useState(''); // identifiant (slug) de l'école filtrée, '' = toutes
   const [err, setErr] = useState(''); const [ok, setOk] = useState('');
   const [form, setForm] = useState(null); const [edit, setEdit] = useState(null); const [busy, setBusy] = useState(false);
+  const [aSupprimer, setASupprimer] = useState(null); // école dont la suppression attend la confirmation
   useEffect(() => { if (loadErr) setErr(loadErr); }, [loadErr]);
   const affichees = list?.filter((s) => !filtre || s.slug === filtre);
   const lien = (s) => `${window.location.origin}/preinscription/${s.slug}`;
@@ -52,6 +53,15 @@ export default function Ecoles() {
     setErr(''); setOk('');
     try { await api(`/saas/schools/${s.id}`, { method: 'PUT', body: { status: 'active', subscription_end: fin } }); setOk(`Abonnement prolongé jusqu'au ${fmtDate(fin)}.`); load(); } catch (x) { setErr(x.message); }
   };
+  // Suppression définitive : exécutée seulement après « Confirmer » dans la boîte de dialogue
+  const supprimer = async () => {
+    setBusy(true); setErr(''); setOk('');
+    try {
+      const r = await api(`/saas/schools/${aSupprimer.id}?confirmer=oui`, { method: 'DELETE' });
+      setOk(`École « ${r.supprimee} » supprimée (${r.utilisateurs} compte(s) et ${r.eleves} élève(s) effacés).`);
+      setASupprimer(null); if (filtre === aSupprimer.slug) setFiltre(''); load();
+    } catch (x) { setErr(x.message); setASupprimer(null); } finally { setBusy(false); }
+  };
   const f = (k) => (e) => setForm((s) => ({ ...s, [k]: e.target.value }));
   const fa = (k) => (e) => setForm((s) => ({ ...s, admin: { ...s.admin, [k]: e.target.value } }));
 
@@ -66,19 +76,20 @@ export default function Ecoles() {
         </div>
       </div>
       <div className="table-wrap"><table>
-        <thead><tr><th>École</th><th>Formule</th><th>Statut</th><th>Début d'abonnement</th><th>Fin d'abonnement</th><th>Utilisateurs</th><th>Élèves</th><th>Lien de pré-inscription</th><th /></tr></thead>
+        <thead><tr><th>École</th><th>Formule</th><th>Statut</th><th>Début d'abonnement</th><th>Fin d'abonnement</th><th>Utilisateurs</th><th>Lien de pré-inscription</th><th /></tr></thead>
         <tbody>
-          {list === null && <tr><td colSpan="9" className="empty">Chargement…</td></tr>}
-          {affichees?.length === 0 && <tr><td colSpan="9" className="empty">Aucune école.</td></tr>}
+          {list === null && <tr><td colSpan="8" className="empty">Chargement…</td></tr>}
+          {affichees?.length === 0 && <tr><td colSpan="8" className="empty">Aucune école.</td></tr>}
           {affichees?.map((s) => (
             <tr key={s.id}>
               <td><b>{s.nom}</b><div className="muted small">{s.ville ? `${s.ville} · ` : ''}{s.slug}{s.telephone ? ` · ${s.telephone}` : ''}</div>{s.adresse && <div className="muted small">{s.adresse}</div>}</td><td>{PLANS[s.plan]}</td>
               <td><Pill kind={s.status === 'active' ? 'ok' : s.status === 'trial' ? 'warn' : 'bad'}>{STATUTS[s.status]}</Pill></td>
-              <td>{s.subscription_start ? fmtDate(s.subscription_start) : '—'}</td><td>{s.subscription_end ? fmtDate(s.subscription_end) : '—'}</td><td>{s.nb_utilisateurs}</td><td>{s.nb_eleves}</td>
+              <td>{s.subscription_start ? fmtDate(s.subscription_start) : '—'}</td><td>{s.subscription_end ? fmtDate(s.subscription_end) : '—'}</td><td>{s.nb_utilisateurs}</td>
               <td><button className="btn sec sm" onClick={() => navigator.clipboard?.writeText(lien(s)).then(() => setOk(`Lien copié : ${lien(s)}`))}>Copier le lien</button></td>
               <td><div className="row"><button className="btn sec sm" onClick={() => setEdit({ ...s, subscription_start: s.subscription_start || '', subscription_end: s.subscription_end || '' })}>Modifier</button>
                 <button className="btn sec sm" onClick={() => basculer(s)}>{s.status === 'suspended' ? 'Réactiver' : 'Suspendre'}</button>
-                <button className="btn sec sm" onClick={() => prolonger(s, 1)}>+1 mois</button><button className="btn sec sm" onClick={() => prolonger(s, 12)}>+1 an</button></div></td>
+                <button className="btn sec sm" onClick={() => prolonger(s, 1)}>+1 mois</button><button className="btn sec sm" onClick={() => prolonger(s, 12)}>+1 an</button>
+                <button className="btn danger sm" onClick={() => { setErr(''); setOk(''); setASupprimer(s); }}>Supprimer</button></div></td>
             </tr>))}
         </tbody>
       </table></div>
@@ -106,6 +117,15 @@ export default function Ecoles() {
           </div>
           <div className="row" style={{ marginTop: '1rem' }}><button className="btn" disabled={busy}>{busy ? 'Création…' : "Créer l'école"}</button><button type="button" className="btn sec" onClick={() => setForm(null)}>Annuler</button></div>
         </form>
+      </Modal>}
+
+      {aSupprimer && <Modal title="Supprimer cette école ?" onClose={() => !busy && setASupprimer(null)}>
+        <p>Vous allez supprimer définitivement l'école <b>« {aSupprimer.nom} »</b>.</p>
+        <p>Seront effacés <b>sans retour possible</b> : ses {aSupprimer.nb_utilisateurs} compte(s) utilisateur, ses {aSupprimer.nb_eleves} élève(s), les notes, absences, paiements, messages et fichiers.</p>
+        <div className="row" style={{ marginTop: '1rem' }}>
+          <button type="button" className="btn danger" disabled={busy} onClick={supprimer}>{busy ? 'Suppression…' : 'Confirmer la suppression'}</button>
+          <button type="button" className="btn sec" disabled={busy} autoFocus onClick={() => setASupprimer(null)}>Annuler</button>
+        </div>
       </Modal>}
 
       {edit && <Modal title={`Modifier – ${edit.nom}`} onClose={() => setEdit(null)}>

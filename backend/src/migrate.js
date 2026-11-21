@@ -47,14 +47,14 @@ async function migrate() {
 
   // Premier administrateur de l'école par défaut
   if (!(await qa("SELECT 1 FROM users WHERE role='admin' AND deleted_at IS NULL LIMIT 1")).rowCount && process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD) {
-    await qa("INSERT INTO users(email,password_hash,role,nom,prenom,school_id,must_change_password) VALUES ($1,$2,'admin',$3,$4,$5,$6) ON CONFLICT (email) DO NOTHING",
+    await qa("INSERT INTO users(email,password_hash,role,nom,prenom,school_id,must_change_password) VALUES ($1,$2,'admin',$3,$4,$5,$6) ON CONFLICT DO NOTHING",
       [process.env.ADMIN_EMAIL.toLowerCase(), await bcrypt.hash(process.env.ADMIN_PASSWORD, 12), process.env.ADMIN_NOM || 'Direction', process.env.ADMIN_PRENOM || 'École', school.id, doitChanger(process.env.ADMIN_PASSWORD)]);
     console.log(`[migrate] Administrateur créé : ${process.env.ADMIN_EMAIL}`);
   }
   // Compte super-administrateur (propriétaire de la plateforme), séparé des directeurs d'école
   if (!(await qa("SELECT 1 FROM users WHERE role='superadmin' AND deleted_at IS NULL LIMIT 1")).rowCount) {
     if (process.env.SUPERADMIN_EMAIL && process.env.SUPERADMIN_PASSWORD) {
-      await qa("INSERT INTO users(email,password_hash,role,nom,prenom,school_id,must_change_password) VALUES ($1,$2,'superadmin','Plateforme','Super-administrateur',NULL,$3) ON CONFLICT (email) DO NOTHING",
+      await qa("INSERT INTO users(email,password_hash,role,nom,prenom,school_id,must_change_password) VALUES ($1,$2,'superadmin','Plateforme','Super-administrateur',NULL,$3) ON CONFLICT DO NOTHING",
         [process.env.SUPERADMIN_EMAIL.toLowerCase(), await bcrypt.hash(process.env.SUPERADMIN_PASSWORD, 12), doitChanger(process.env.SUPERADMIN_PASSWORD)]);
       console.log(`[migrate] Super-administrateur créé : ${process.env.SUPERADMIN_EMAIL}`);
     } else console.warn('[migrate] Aucun super-administrateur : définissez SUPERADMIN_EMAIL et SUPERADMIN_PASSWORD pour gérer les écoles.');

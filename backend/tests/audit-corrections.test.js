@@ -215,7 +215,10 @@ test('inscription : adresse e-mail confirmée par code avant la première connex
     assert.equal((await call(null, 'POST', '/api/public/verify-email', { email: mail, code: code2 })).status, 200);
     assert.equal((await call(null, 'POST', '/api/auth/login', { email: mail, password: PW })).status, 200, 'connexion possible une fois confirmée');
     assert.equal((await call(null, 'POST', '/api/public/verify-email', { email: mail, code: code2 })).status, 400, 'code à usage unique');
-    assert.equal((await call(null, 'POST', '/api/public/signup', { nom: `Verif2 ${stamp}`, email: mail, password: PW })).status, 409, 'adresse confirmée : non réutilisable');
+    // L'e-mail n'est unique que par école : la même adresse peut ouvrir une autre école (compte distinct)
+    const s2 = await call(null, 'POST', '/api/public/signup', { nom: `Verif2 ${stamp}`, email: mail, password: 'Autre@2026Zz2' });
+    assert.equal(s2.status, 201, JSON.stringify(s2.data)); assert.notEqual(s2.data.slug, s1.data.slug);
+    ecoles.push((await db.qa('SELECT id FROM schools WHERE slug=$1', [s2.data.slug])).rows[0].id);
   } finally { delete process.env.VERIFY_SIGNUP_EMAIL; }
 });
 test('inscription non confirmée : la même adresse peut la reprendre (pas de blocage par un tiers), et l\'ancien mot de passe ne marche pas', async () => {

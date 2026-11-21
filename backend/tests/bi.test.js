@@ -19,7 +19,8 @@ async function call(token, method, url, body) {
   return { status: res.status, data: await res.json().catch(() => null) };
 }
 const must = async (token, method, url, body) => { const r = await call(token, method, url, body); assert.ok(r.status < 300, `${method} ${url} -> ${r.status} ${JSON.stringify(r.data).slice(0, 300)}`); return r.data; };
-const login = async (email) => (await must(null, 'POST', '/api/auth/login', { email, password: PW })).token;
+// Les comptes créés par l'administrateur doivent changer leur mot de passe provisoire : les tests lèvent cette obligation pour exercer le reste de l'API
+const login = async (email) => { const r = await must(null, 'POST', '/api/auth/login', { email, password: PW }); if (r.user.must_change_password) await db.qa('UPDATE users SET must_change_password=FALSE WHERE id=$1', [r.user.id]); return r.token; };
 const bi = (token, nom, qs = '') => must(token, 'GET', `/api/bi/${nom}${qs}`);
 const ins = async (schoolId, table, o) => {
   const k = Object.keys(o);

@@ -45,15 +45,24 @@ export default function Login() {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [nonVerifie, setNonVerifie] = useState(false); // adresse e-mail d'une inscription pas encore confirmée
+  const [ecoles, setEcoles] = useState(null); // écoles proposées quand la même adresse + le même mot de passe existent dans plusieurs écoles
+  const [ecole, setEcole] = useState('');
   const submit = async (e) => {
     e.preventDefault(); setBusy(true); setErr(''); setNonVerifie(false);
-    try { await login(email, password); } catch (x) { setErr(x.message); setNonVerifie(x.data?.code === 'email_not_verified'); } finally { setBusy(false); }
+    try { await login(email, password, ecole); }
+    catch (x) {
+      if (x.data?.code === 'school_required') { setEcoles(x.data.ecoles); setErr(ecole ? x.message : ''); } else { setEcoles(null); setErr(x.message); }
+      setNonVerifie(x.data?.code === 'email_not_verified');
+    } finally { setBusy(false); }
   };
   return (
     <AuthShell title="Connexion" subtitle="Utilisez les identifiants remis par l'école.">
       <form onSubmit={submit}>
         <div className="form-field"><label htmlFor="email">Adresse e-mail</label><input id="email" type="email" required maxLength={120} autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
         <div className="form-field"><label htmlFor="pw">Mot de passe</label><PasswordInput id="pw" required maxLength={128} autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} /></div>
+        {ecoles && <div className="form-field"><label htmlFor="ecole-login">Votre école <span className="req" aria-hidden="true">*</span></label>
+          <select id="ecole-login" required value={ecole} onChange={(e) => setEcole(e.target.value)}><option value="">— Choisir votre école —</option>{ecoles.map((s) => <option key={s.slug} value={s.slug}>{s.nom}</option>)}</select>
+          <div className="help">Cette adresse e-mail est utilisée dans plusieurs écoles : choisissez celle dans laquelle vous voulez entrer.</div></div>}
         <Alert>{err}</Alert>
         {nonVerifie && <p className="small"><Link to={`/verifier-email?email=${encodeURIComponent(email.trim())}`}>Saisir mon code de confirmation</Link></p>}
         <button className="btn block" disabled={busy}>{busy ? <><span className="spinner" aria-hidden="true" />Connexion…</> : <><Icon name="log-in" size={16} />Se connecter</>}</button>

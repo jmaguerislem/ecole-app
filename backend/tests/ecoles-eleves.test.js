@@ -19,7 +19,7 @@ async function call(token, method, url, body) {
   const res = await fetch(base + url, { method, headers, body: body ? JSON.stringify(body) : undefined });
   return { status: res.status, data: await res.json().catch(() => null) };
 }
-const login = async (email, password = PW) => call(null, 'POST', '/api/auth/login', { email, password });
+const login = async (email, password = PW) => { const r = await call(null, 'POST', '/api/auth/login', { email, password }); if (r.data?.user?.must_change_password) await db.qa('UPDATE users SET must_change_password=FALSE WHERE id=$1', [r.data.user.id]); return r; };
 const eleve = (extra = {}) => ({ nom: "Essai", prenom: "Sami", date_naissance: '2018-05-05', statut: 'actif', password: PW, password_confirm: PW, ...extra });
 
 test.before(async () => {

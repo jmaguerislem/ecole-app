@@ -20,7 +20,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   const open = (r) => { setToken(r.token); setUser(r.user); if (isNative) registerPush().catch(() => {}); };
-  const login = async (email, password) => open(await api('/auth/login', { method: 'POST', body: { email, password } }));
+  const login = async (email, password, school) => open(await api('/auth/login', { method: 'POST', body: { email, password, ...(school ? { school } : {}) } }));
   // Connexion de démonstration : le serveur ouvre la session d'un vrai compte enregistré (aucun identifiant ni mot de passe côté navigateur)
   const loginDemo = async (groupe, role) => open(await api('/demo/login', { method: 'POST', body: { groupe, role } }));
   // Relit le profil (après changement du mot de passe temporaire, ou modification du profil)

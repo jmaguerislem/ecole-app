@@ -22,7 +22,8 @@ async function call(token, method, url, body, raw) {
   return { status: res.status, data, text };
 }
 const must = async (token, method, url, body) => { const r = await call(token, method, url, body); assert.ok(r.status < 300, `${method} ${url} -> ${r.status} ${r.text.slice(0, 200)}`); return r.data; };
-const login = async (email, password = PW) => (await must(null, 'POST', '/api/auth/login', { email, password })).token;
+// Les comptes créés par l'administrateur doivent changer leur mot de passe provisoire : les tests lèvent cette obligation pour exercer le reste de l'API
+const login = async (email, password = PW) => { const r = await must(null, 'POST', '/api/auth/login', { email, password }); if (r.user.must_change_password) await db.qa('UPDATE users SET must_change_password=FALSE WHERE id=$1', [r.user.id]); return r.token; };
 
 const L = (n) => 'ABC'[n - 1];
 async function creerEcole(n) {
@@ -58,6 +59,7 @@ test.before(async () => {
   await db.qa('DELETE FROM demo_accounts');
   for (const s of E) for (const role of ROLES) {
     const u = (await db.qa('SELECT id FROM users WHERE email=$1', [s.mails[role]])).rows[0];
+    await db.qa('UPDATE users SET must_change_password=FALSE WHERE id=$1', [u.id]); // comme les vrais comptes démo (créés par le seed SQL, jamais à changer)
     await db.qa('INSERT INTO demo_accounts(groupe,role,user_id) VALUES ($1,$2,$3)', [s.n, role, u.id]);
   }
 });
@@ -183,7 +185,11 @@ test('profil : consulter, modifier nom/prénom/téléphone, e-mail (mot de passe
   const nouveau = `sa2-sd-${stamp}@saas.test`;
   assert.equal((await call(sa, 'PUT', '/api/saas/profil', { email: nouveau })).status, 400);
   assert.equal((await call(sa, 'PUT', '/api/saas/profil', { email: nouveau, mot_de_passe_actuel: 'mauvais' })).status, 400);
-  assert.equal((await call(sa, 'PUT', '/api/saas/profil', { email: E[0].mails.admin, mot_de_passe_actuel: PW })).status, 409);
+  // Adresse déjà prise par un autre compte DE LA PLATEFORME : refusée ; l'adresse d'une direction d'école est indépendante (unicité par école)
+  const autreSuper = `autre-sa-${stamp}@saas.test`;
+  await db.qa("INSERT INTO users(email,password_hash,role,nom,prenom,school_id) VALUES ($1,'x','superadmin','Autre','Super',NULL)", [autreSuper]);
+  try { assert.equal((await call(sa, 'PUT', '/api/saas/profil', { email: autreSuper, mot_de_passe_actuel: PW })).status, 409); }
+  finally { await db.qa('DELETE FROM users WHERE email=$1', [autreSuper]); }
   await must(sa, 'PUT', '/api/saas/profil', { email: nouveau, mot_de_passe_actuel: PW });
   assert.equal((await must(sa, 'GET', '/api/auth/me')).email, nouveau); assert.equal((await must(sa, 'GET', '/api/auth/me')).telephone, '22333444');
   assert.equal((await call(null, 'POST', '/api/auth/login', { email: saEmail, password: PW })).status, 401, 'ancien e-mail inutilisable');

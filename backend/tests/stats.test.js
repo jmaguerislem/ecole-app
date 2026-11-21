@@ -15,7 +15,7 @@ async function call(token, method, url, body) {
   const res = await fetch(base + url, { method, headers, body: body ? JSON.stringify(body) : undefined });
   return { status: res.status, data: await res.json().catch(() => null) };
 }
-const login = async (email) => (await call(null, 'POST', '/api/auth/login', { email, password: PW })).data.token;
+const login = async (email) => { const l = await call(null, 'POST', '/api/auth/login', { email, password: PW }); if (l.data.user?.must_change_password) await db.qa('UPDATE users SET must_change_password=FALSE WHERE id=$1', [l.data.user.id]); return l.data.token; };
 const un = async (sql, p) => Number((await db.qa(sql, p)).rows[0].n);
 
 test.before(async () => {

@@ -25,7 +25,8 @@ async function call(token, method, url, body) {
   return { status: res.status, data: ct.includes('json') ? await res.json() : await res.text() };
 }
 const must = async (t, m, u, b) => { const r = await call(t, m, u, b); assert.ok(r.status < 300, `${m} ${u} -> ${r.status} ${JSON.stringify(r.data).slice(0, 300)}`); return r.data; };
-const login = async (email, password = PW) => (await must(null, 'POST', '/api/auth/login', { email, password })).token;
+// Les comptes créés par l'administrateur doivent changer leur mot de passe provisoire : les tests lèvent cette obligation pour exercer le reste de l'API
+const login = async (email, password = PW) => { const r = await must(null, 'POST', '/api/auth/login', { email, password }); if (r.user.must_change_password) await db.qa('UPDATE users SET must_change_password=FALSE WHERE id=$1', [r.user.id]); return r.token; };
 const mdpTemp = (mail) => /Mot de passe temporaire : (\S+)/.exec(mail.text)?.[1];
 const codeDu = (mail) => /Code d'activation[^:]*: ([A-Z0-9]{5}-[A-Z0-9]{5})/.exec(mail.text)?.[1];
 const dernierMail = (to) => [...mailer.sent].reverse().find((m) => m.to === to);
@@ -128,13 +129,13 @@ test('panne d\'envoi d\'e-mail : l\'inscription est conservée, l\'échec est si
   assert.equal((await call(s.admin, 'POST', `/api/users/${u.id}/renvoyer-invitation`)).status, 409);
 });
 
-test('e-mail parent déjà pris par un autre rôle ou une autre école : refus clair, aucun élève créé', async () => {
+test('e-mail parent déjà pris par un autre rôle dans la même école : refus clair ; une autre école peut utiliser la même adresse', async () => {
   const s = E.A; const avant = (await must(s.admin, 'GET', '/api/eleves')).length;
   const r1 = await call(s.admin, 'POST', '/api/eleves', elevePayload(s, 'Test', 'Doublon', { nom: 'Prof', prenom: 'Xavier', email: `x-A-${stamp}@mob.tn` }));
   assert.equal(r1.status, 409, JSON.stringify(r1.data)); assert.match(r1.data.error, /pas un compte parent/);
   const r2 = await call(E.B.admin, 'POST', '/api/eleves', elevePayload(E.B, 'Test', 'Autre', { nom: 'Gharbi', prenom: 'Karim', email: E.A.parentMail }));
-  assert.equal(r2.status, 409, JSON.stringify(r2.data)); assert.match(r2.data.error, /autre établissement/); assert.ok(!r2.data.error.includes(E.A.slug));
-  assert.equal((await must(s.admin, 'GET', '/api/eleves')).length, avant, 'aucun élève créé après un refus');
+  assert.equal(r2.status, 201, JSON.stringify(r2.data)); assert.equal(r2.data.invitation.compte_cree, true, 'un compte parent distinct est créé dans l\'autre école');
+  assert.equal((await must(s.admin, 'GET', '/api/eleves')).length, avant, 'aucun élève créé après le refus (rôle différent)');
   assert.equal((await call(s.admin, 'POST', '/api/eleves', elevePayload(s, 'Test', 'Invalide', { nom: 'Parent', prenom: 'Quentin', email: 'pas-un-email' }))).status, 400);
 });
 
@@ -143,7 +144,7 @@ test('mot de passe oublié : réponse identique pour un compte inconnu, e-mail e
   const r1 = await must(null, 'POST', '/api/auth/forgot-password', { email: `inconnu-${stamp}@nulle.part` });
   assert.equal(mailer.sent.length, avant);
   const r2 = await must(null, 'POST', '/api/auth/forgot-password', { email: s.parentMail });
-  assert.deepEqual(r1, r2); assert.equal(mailer.sent.length, avant + 1);
+  assert.deepEqual(r1, r2); assert.equal(mailer.sent.length, avant + 2, 'un e-mail par compte portant cette adresse (une adresse peut exister dans plusieurs écoles)');
   const code = codeDu(dernierMail(s.parentMail)) || /Code : ([A-Z0-9]{5}-[A-Z0-9]{5})/.exec(dernierMail(s.parentMail).text)[1];
   for (let i = 0; i < 5; i++) assert.equal((await call(null, 'POST', '/api/auth/set-password', { email: s.parentMail, code: 'ZZZZZ-ZZZZZ', password: 'Nouveau@2026x' })).status, 400);
   assert.equal((await call(null, 'POST', '/api/auth/set-password', { email: s.parentMail, code, password: 'Nouveau@2026x' })).status, 400, 'code verrouillé après 5 échecs');

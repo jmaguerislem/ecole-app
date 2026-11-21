@@ -36,14 +36,12 @@ async function trouverOuCreerParent(client, { nom, prenom, email, telephone }, {
   const nomP = V.nomPropre(nom, 'Le nom du parent'); const prenomP = V.nomPropre(prenom, 'Le prénom du parent');
   if (telephone) { const t = String(telephone); if (!/^\d{8}$/.test(t)) throw new HttpError(400, 'Le téléphone du parent doit contenir exactement 8 chiffres'); }
   // Même adresse déjà utilisée ? (compte visible par l'école via RLS = même école)
-  const dansEcole = (await client.query('SELECT id, role, deleted_at FROM users WHERE email=$1', [mail])).rows[0];
+  const dansEcole = (await client.query('SELECT id, role FROM users WHERE email=$1 AND deleted_at IS NULL', [mail])).rows[0];
   if (dansEcole) {
-    if (dansEcole.deleted_at) throw new HttpError(409, 'Cette adresse e-mail correspond à un compte supprimé : utilisez une autre adresse.');
     if (dansEcole.role !== 'parent') throw new HttpError(409, "Cette adresse e-mail est déjà utilisée par un compte qui n'est pas un compte parent.");
     return { id: dansEcole.id, cree: false, email: mail };
   }
-  // Adresse utilisée dans une AUTRE école (e-mail unique dans toute la base) : refus explicite, sans révéler laquelle
-  if ((await qa('SELECT 1 FROM users WHERE email=$1', [mail])).rowCount) throw new HttpError(409, "Cette adresse e-mail est déjà utilisée sur la plateforme (autre établissement) : utilisez une autre adresse pour ce parent.");
+  // Une adresse déjà utilisée dans une AUTRE école ne gêne pas : l'e-mail n'est unique que dans une école (le parent aura un compte distinct dans celle-ci)
   await verifierQuota(schoolId, 'utilisateurs');
   const temporaire = motDePasseTemporaire();
   const u = (await client.query(
@@ -106,23 +104,78 @@ async function inviterParent({ userId, ecole, tempPassword = null, renvoi = fals
   }
 }
 
+const ROLES_LIBELLE = { admin: 'de direction (administrateur)', enseignant: 'enseignant', comptable: 'de comptabilité', parent: 'parent', eleve: 'élève' };
+
+// Compte créé par un administrateur d'école (enseignant, comptable, personnel…) : e-mail de confirmation avec l'identifiant et le mot de passe INITIAL.
+// Ce mot de passe est provisoire : le compte est créé avec `must_change_password` (changement obligatoire dès la première connexion, l'API refuse tout le reste avant).
+// Appelé APRÈS validation de la transaction ; ne lève jamais d'exception (un échec d'envoi n'annule pas la création : l'état est renvoyé à l'administrateur).
+async function envoyerIdentifiants({ userId, ecole, motDePasse }) {
+  try {
+    const u = (await qa('SELECT id,email,nom,prenom,role,school_id FROM users WHERE id=$1', [userId])).rows[0];
+    if (!u) return { ok: false, error: 'Compte introuvable' };
+    const r = await envoyerEmail({
+      to: u.email,
+      subject: `[${ecole}] Votre compte a été créé`,
+      text: `Bonjour ${u.prenom} ${u.nom},\n\nVotre compte ${ROLES_LIBELLE[u.role] || ''} a été créé à ${ecole}.\n\nVoici vos identifiants de connexion :\n\n  Adresse de connexion : ${config.appUrl}\n  Identifiant (e-mail) : ${u.email}\n  Mot de passe provisoire : ${motDePasse}\n\n` +
+        `Pour votre sécurité, vous devrez choisir votre propre mot de passe dès votre première connexion. Ne communiquez ce mot de passe à personne.\nSi vous n'attendiez pas ce message, ignorez-le ou contactez l'école.\n\nCordialement,\n${ecole}`,
+    });
+    await qa('UPDATE users SET invitation_envoyee_at=$2, invitation_erreur=$3 WHERE id=$1', [userId, r.ok ? new Date() : null, r.ok ? null : r.error]);
+    await qa("INSERT INTO notification_log(school_id,user_id,canal,sujet,statut,erreur) VALUES ($1,$2,'email',$3,$4,$5)", [u.school_id, userId, 'Identifiants du nouveau compte', r.ok ? 'envoye' : 'echec', r.ok ? null : r.error]);
+    return r;
+  } catch (e) {
+    console.error('[identifiants]', e.message);
+    return { ok: false, error: 'Erreur interne lors de l\'envoi' };
+  }
+}
+
 // Définition du mot de passe avec le code reçu. Messages volontairement génériques (pas d'énumération de comptes).
+// Une même adresse peut exister dans plusieurs écoles : un code est envoyé pour chaque compte, et c'est le code saisi qui désigne le compte concerné.
 async function definirMotDePasse({ email, code, password }) {
   const GENERIC = new HttpError(400, 'Code invalide ou expiré. Demandez un nouveau code depuis l\'écran de connexion.');
   const mail = String(email || '').toLowerCase().trim();
-  const u = (await qa('SELECT id,actif FROM users WHERE email=$1 AND deleted_at IS NULL', [mail])).rows[0];
-  if (!u || !u.actif) throw GENERIC;
-  const t = (await qa('SELECT * FROM password_setup_tokens WHERE user_id=$1 AND used_at IS NULL AND expires_at>now() ORDER BY id DESC LIMIT 1', [u.id])).rows[0];
-  if (!t) throw GENERIC;
-  if (t.essais >= MAX_ESSAIS) { await qa('UPDATE password_setup_tokens SET used_at=now() WHERE id=$1', [t.id]); throw GENERIC; }
-  const a = Buffer.from(sha(code)); const b = Buffer.from(t.token_hash);
-  if (!(a.length === b.length && crypto.timingSafeEqual(a, b))) { await qa('UPDATE password_setup_tokens SET essais=essais+1 WHERE id=$1', [t.id]); throw GENERIC; }
+  const comptes = (await qa('SELECT id, email_a_verifier FROM users WHERE email=$1 AND deleted_at IS NULL AND actif ORDER BY id LIMIT 10', [mail])).rows;
+  let trouve = null; const essayes = [];
+  for (const c of comptes) {
+    const t = (await qa('SELECT * FROM password_setup_tokens WHERE user_id=$1 AND used_at IS NULL AND expires_at>now() ORDER BY id DESC LIMIT 1', [c.id])).rows[0];
+    if (!t) continue;
+    if (t.essais >= MAX_ESSAIS) { await qa('UPDATE password_setup_tokens SET used_at=now() WHERE id=$1', [t.id]); continue; }
+    const a = Buffer.from(sha(code)); const b = Buffer.from(t.token_hash);
+    if (a.length === b.length && crypto.timingSafeEqual(a, b)) { trouve = c; break; }
+    essayes.push(t.id);
+  }
+  if (!trouve) { for (const id of essayes) await qa('UPDATE password_setup_tokens SET essais=essais+1 WHERE id=$1', [id]); throw GENERIC; }
   V.motDePasse(password, 'Le mot de passe');
   if (String(password).toLowerCase() === mail) throw new HttpError(400, "Le mot de passe ne doit pas être identique à l'e-mail");
   // Le code est arrivé dans la boîte du titulaire : l'adresse est de ce fait prouvée (un compte d'inscription en attente devient utilisable)
-  await qa('UPDATE users SET password_hash=$2, mot_de_passe_defini=TRUE, must_change_password=FALSE, email_a_verifier=FALSE WHERE id=$1', [u.id, await bcrypt.hash(String(password), 12)]);
-  await qa('UPDATE password_setup_tokens SET used_at=now() WHERE user_id=$1 AND used_at IS NULL', [u.id]);
+  await qa('UPDATE users SET password_hash=$2, mot_de_passe_defini=TRUE, must_change_password=FALSE, email_a_verifier=FALSE WHERE id=$1', [trouve.id, await bcrypt.hash(String(password), 12)]);
+  await qa('UPDATE password_setup_tokens SET used_at=now() WHERE user_id=$1 AND used_at IS NULL', [trouve.id]);
+  if (trouve.email_a_verifier) await notifierNouvelleEcole(trouve.id, { confirme: true });
   return { ok: true };
+}
+
+// Nouvelle école inscrite en libre-service : prévient le(s) super-administrateur(s) par e-mail (+ SUPERADMIN_NOTIFY_EMAIL, liste séparée par des virgules)
+// et garde une trace dans le journal (affichée sur l'accueil du super-administrateur). Ne lève jamais d'exception : l'inscription n'en dépend pas.
+async function notifierNouvelleEcole(userId, { confirme = false } = {}) {
+  try {
+    const d = (await qa(`SELECT u.email, u.school_id, s.nom, s.slug, s.plan, s.status, s.subscription_end, s.created_at
+                         FROM users u JOIN schools s ON s.id=u.school_id WHERE u.id=$1`, [userId])).rows[0];
+    if (!d) return;
+    // La trace est écrite avant de rendre la main (rapide) ; seul l'envoi des e-mails (réseau, parfois lent) se poursuit en arrière-plan
+    await qa("INSERT INTO audit_log(school_id,user_id,action,entite,entite_id,nouvelles) VALUES ($1,$2,'inscription_ecole','schools',$1,$3)",
+      [d.school_id, userId, JSON.stringify({ nom: d.nom, slug: d.slug, email: d.email, email_confirme: confirme })]);
+    envoyerNotification(d, confirme).catch((e) => console.error('[notification inscription]', e.message));
+  } catch (e) { console.error('[notification inscription]', e.message); }
+}
+async function envoyerNotification(d, confirme) {
+  const supers = (await qa("SELECT id, email FROM users WHERE role='superadmin' AND actif AND deleted_at IS NULL")).rows;
+  const extra = String(process.env.SUPERADMIN_NOTIFY_EMAIL || '').split(',').map((x) => x.trim().toLowerCase()).filter((x) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(x));
+  const destinataires = new Map(); for (const s of supers) destinataires.set(s.email, s.id); for (const e of extra) if (!destinataires.has(e)) destinataires.set(e, null);
+  const jour = (v) => (v ? new Date(v).toISOString().slice(0, 10) : '—');
+  const text = `Une nouvelle école vient de s'inscrire sur ${config.plateformeNom}.\n\n  École : ${d.nom}\n  Identifiant (lien) : ${d.slug}\n  E-mail de la direction : ${d.email} (${confirme ? 'adresse confirmée' : 'adresse non vérifiée'})\n  Formule : ${d.plan} · Statut : ${d.status}\n  Inscrite le : ${jour(d.created_at)} · Fin de l'essai : ${jour(d.subscription_end)}\n  Lien de pré-inscription : ${config.appUrl}/preinscription/${d.slug}\n\nGérer les écoles : ${config.appUrl}/ecoles\n`;
+  for (const [to, superId] of destinataires) {
+    const r = await envoyerEmail({ to, subject: `[${config.plateformeNom}] Nouvelle école inscrite : ${d.nom}`, text });
+    await qa("INSERT INTO notification_log(school_id,user_id,canal,sujet,statut,erreur) VALUES ($1,$2,'email',$3,$4,$5)", [d.school_id, superId, `Nouvelle école inscrite : ${d.nom}`, r.ok ? 'envoye' : 'echec', r.ok ? null : r.error]).catch(() => {});
+  }
 }
 
 // Inscription libre-service : e-mail contenant le code qui prouve que l'adresse appartient bien à la personne qui s'inscrit. Ne lève jamais d'exception.
@@ -149,20 +202,23 @@ async function verifierEmail({ email, code }) {
   if (!(a.length === b.length && crypto.timingSafeEqual(a, b))) { await qa('UPDATE password_setup_tokens SET essais=essais+1 WHERE id=$1', [t.id]); throw GENERIC; }
   await qa('UPDATE users SET email_a_verifier=FALSE WHERE id=$1', [u.id]);
   await qa('UPDATE password_setup_tokens SET used_at=now() WHERE user_id=$1 AND used_at IS NULL', [u.id]);
+  await notifierNouvelleEcole(u.id, { confirme: true });
   return { ok: true };
 }
 
 // « Première connexion / mot de passe oublié » : répond toujours pareil (aucune fuite sur l'existence du compte)
+// Une même adresse peut avoir un compte dans plusieurs écoles : un e-mail (avec son propre code) est envoyé pour chacun, l'objet indique l'école.
 async function reinitialiser(email) {
   try {
     const mail = String(email || '').toLowerCase().trim();
-    const u = (await qa(`SELECT u.id,u.email,u.nom,u.prenom,u.actif,u.role,s.nom AS ecole FROM users u LEFT JOIN schools s ON s.id=u.school_id WHERE u.email=$1 AND u.deleted_at IS NULL`, [mail])).rows[0];
-    if (!u || !u.actif || u.role === 'superadmin') return;
-    const code = await creerCode(u.id);
-    const r = await envoyerEmail({ to: u.email, subject: `[${u.ecole}] Définir votre mot de passe`, text:
-      `Bonjour ${u.prenom} ${u.nom},\n\nVoici votre code pour définir un nouveau mot de passe (usage unique, valable ${VALIDITE_H} h) :\n\n  Identifiant : ${u.email}\n  Code : ${formaterCode(code)}\n\nDans l'application, touchez « Première connexion / mot de passe oublié » puis saisissez ce code.\nSi vous n'êtes pas à l'origine de cette demande, ignorez ce message.\n\n${u.ecole}` });
-    if (!r.ok) console.error('[reinitialisation] e-mail non envoyé :', r.error);
+    const comptes = (await qa(`SELECT u.id,u.email,u.nom,u.prenom,u.actif,u.role,s.nom AS ecole FROM users u LEFT JOIN schools s ON s.id=u.school_id WHERE u.email=$1 AND u.deleted_at IS NULL AND u.actif AND u.role<>'superadmin' ORDER BY u.id LIMIT 10`, [mail])).rows;
+    for (const u of comptes) {
+      const code = await creerCode(u.id);
+      const r = await envoyerEmail({ to: u.email, subject: `[${u.ecole}] Définir votre mot de passe`, text:
+        `Bonjour ${u.prenom} ${u.nom},\n\nVoici votre code pour définir un nouveau mot de passe pour votre compte à ${u.ecole} (usage unique, valable ${VALIDITE_H} h) :\n\n  Identifiant : ${u.email}\n  Code : ${formaterCode(code)}\n\nSaisissez-le sur ${config.appUrl}/mot-de-passe-oublie\nSi vous n'avez rien demandé, ignorez ce message : votre mot de passe actuel reste valable.\n` });
+      if (!r.ok) console.error('[reinitialisation] e-mail non envoyé :', r.error);
+    }
   } catch (e) { console.error('[reinitialisation]', e.message); }
 }
 
-module.exports = { envoyerCodeVerification, verifierEmail, reinitialiser, trouverOuCreerParent, inviterParent, definirMotDePasse, creerCode, motDePasseTemporaire, VALIDITE_H };
+module.exports = { envoyerIdentifiants, notifierNouvelleEcole, envoyerCodeVerification, verifierEmail, reinitialiser, trouverOuCreerParent, inviterParent, definirMotDePasse, creerCode, motDePasseTemporaire, VALIDITE_H };

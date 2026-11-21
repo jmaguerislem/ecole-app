@@ -42,8 +42,13 @@ test('inscription libre-service : école créée en essai de 30 jours, connexion
   assert.equal(l.status, 200); assert.equal(l.data.user.role, 'admin'); admin = l.data.token;
 });
 
-test('inscription : e-mail déjà utilisé, mot de passe faible et nom manquant refusés', async () => {
-  assert.equal((await call(null, 'POST', '/api/public/signup', { nom: 'Autre école', email: `dir-${stamp}@signup.test`, password: PW })).status, 409);
+test('inscription : même e-mail accepté pour une autre école (unicité par école) ; mot de passe faible et nom manquant refusés', async () => {
+  const autre = await call(null, 'POST', '/api/public/signup', { nom: 'Autre école', email: `dir-${stamp}@signup.test`, password: PW });
+  assert.equal(autre.status, 201, JSON.stringify(autre.data));
+  const s = (await db.qa('SELECT id FROM schools WHERE slug=$1', [autre.data.slug])).rows[0];
+  await new Promise((r) => setTimeout(r, 400)); // laisse le journal d'envoi de la notification au super-administrateur (arrière-plan) s'écrire avant le nettoyage
+  for (const t of ['audit_log', 'notification_log', 'users']) await db.qa(`DELETE FROM ${t} WHERE school_id=$1`, [s.id]);
+  await db.qa('DELETE FROM schools WHERE id=$1', [s.id]);
   assert.equal((await call(null, 'POST', '/api/public/signup', { nom: 'Autre école', email: `x-${stamp}@signup.test`, password: 'court' })).status, 400);
   assert.equal((await call(null, 'POST', '/api/public/signup', { email: `y-${stamp}@signup.test`, password: PW })).status, 400);
 });
@@ -53,7 +58,8 @@ test('inscription : deux écoles de même nom reçoivent des identifiants distin
   assert.equal(r.status, 201);
   const s = (await db.qa('SELECT id, slug FROM schools WHERE slug=$1', [r.data.slug])).rows[0];
   assert.notEqual(s.id, schoolId);
-  for (const t of ['audit_log', 'users']) await db.qa(`DELETE FROM ${t} WHERE school_id=$1`, [s.id]);
+  await new Promise((r) => setTimeout(r, 400)); // laisse le journal d'envoi de la notification au super-administrateur (arrière-plan) s'écrire avant le nettoyage
+  for (const t of ['audit_log', 'notification_log', 'users']) await db.qa(`DELETE FROM ${t} WHERE school_id=$1`, [s.id]);
   await db.qa('DELETE FROM schools WHERE id=$1', [s.id]);
 });
 

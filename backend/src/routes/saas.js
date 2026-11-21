@@ -1,6 +1,9 @@
 // Espace du propriétaire de la plateforme : gestion des écoles (réservé au rôle « superadmin »).
 // Ces requêtes utilisent le pool « propriétaire » (qa/txa) : elles ne lisent aucune donnée d'élève, uniquement les écoles et leurs comptes de direction.
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const config = require('../config');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { qa, txa } = require('../db');
@@ -65,7 +68,6 @@ r.post('/schools', ah(async (req, res) => {
   const adminPrenom = V.nomPropre(a.prenom || 'École', 'Le prénom de la direction');
   const genere = !a.password;
   const motDePasse = genere ? crypto.randomBytes(9).toString('base64url') : V.motDePasse(a.password, 'Le mot de passe de la direction');
-  if ((await qa('SELECT 1 FROM users WHERE email=$1', [email])).rowCount) throw new HttpError(409, 'Cette adresse e-mail est déjà utilisée');
   if (!b.slug) { for (let i = 2; (await qa('SELECT 1 FROM schools WHERE slug=$1', [slug])).rowCount; i++) slug = `${slugify(nom).slice(0, 36)}-${i}`; }
   else if ((await qa('SELECT 1 FROM schools WHERE slug=$1', [slug])).rowCount) throw new HttpError(409, 'Cet identifiant est déjà utilisé');
   const hash = await bcrypt.hash(motDePasse, 12);
@@ -104,6 +106,38 @@ r.put('/schools/:id(\\d+)', ah(async (req, res) => {
   res.json(n);
 }));
 
+// Suppression DÉFINITIVE d'une école et de toutes ses données (comptes, élèves, notes, paiements, messages, fichiers…).
+// Presque aucune clé étrangère n'est en cascade : on vide chaque table de l'école dans le bon ordre. L'ordre n'est pas écrit en dur — on retente, passe après passe,
+// les tables dont la suppression est refusée tant que d'autres lignes les référencent. Le tout dans UNE transaction : en cas d'échec rien n'est supprimé.
+r.delete('/schools/:id(\\d+)', ah(async (req, res) => {
+  const id = Number(req.params.id);
+  const ecole = (await qa('SELECT id, nom, slug FROM schools WHERE id=$1', [id])).rows[0];
+  if (!ecole) throw new HttpError(404, 'École introuvable');
+  if (req.query.confirmer !== 'oui') throw new HttpError(400, 'Confirmation requise pour supprimer une école');
+  const tables = (await qa("SELECT table_name FROM information_schema.columns WHERE table_schema='public' AND column_name='school_id' AND table_name<>'schools' ORDER BY table_name")).rows.map((x) => x.table_name);
+  const compte = (await qa('SELECT (SELECT COUNT(*)::int FROM users WHERE school_id=$1) AS utilisateurs, (SELECT COUNT(*)::int FROM eleves WHERE school_id=$1) AS eleves', [id])).rows[0];
+  await txa(async (cl) => {
+    let restantes = tables;
+    for (let passe = 0; restantes.length && passe < 12; passe++) {
+      const refusees = [];
+      for (const t of restantes) {
+        await cl.query('SAVEPOINT suppr');
+        try { await cl.query(`DELETE FROM "${t}" WHERE school_id=$1`, [id]); await cl.query('RELEASE SAVEPOINT suppr'); }
+        catch (e) { await cl.query('ROLLBACK TO SAVEPOINT suppr'); if (e.code !== '23503') throw e; refusees.push(t); }
+      }
+      if (refusees.length === restantes.length) break; // plus aucun progrès : une référence extérieure bloque
+      restantes = refusees;
+    }
+    if (restantes.length) throw new HttpError(409, `Suppression impossible : des données restent liées à cette école (${restantes.join(', ')}).`);
+    await cl.query('DELETE FROM schools WHERE id=$1', [id]);
+  });
+  // Fichiers téléversés de l'école (hors transaction : une base cohérente prime sur un dossier orphelin)
+  await fs.promises.rm(path.join(config.uploadDir, String(id)), { recursive: true, force: true }).catch(() => {});
+  // La trace est conservée sans lien avec l'école (elle n'existe plus)
+  await qa("INSERT INTO audit_log(school_id,user_id,action,entite,entite_id,anciennes) VALUES (NULL,$1,'delete','schools',$2,$3)", [req.user.id, id, JSON.stringify({ ...ecole, ...compte })]).catch(() => {});
+  res.json({ ok: true, supprimee: ecole.nom, ...compte });
+}));
+
 // ---------- Accueil du propriétaire : totaux + indicateurs ----------
 r.get('/accueil', ah(async (_req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -136,9 +170,11 @@ r.get('/accueil', ah(async (_req, res) => {
 const ROLES_DASH = [['admin', 'Administrateurs'], ['comptable', 'Comptables'], ['enseignant', 'Enseignants'], ['parent', 'Parents'], ['eleve', 'Élèves']];
 r.get('/dashboard', ah(async (_req, res) => {
   res.set('Cache-Control', 'no-store');
-  const [ecoles, comptes] = await Promise.all([
+  const [ecoles, comptes, inscr] = await Promise.all([
     listerEcoles({ complet: true }),
     qa("SELECT school_id, role, COUNT(*)::int AS n FROM users WHERE deleted_at IS NULL AND school_id IS NOT NULL GROUP BY 1,2"),
+    // Écoles inscrites en libre-service ces 30 derniers jours (la trace disparaît avec l'école si elle est supprimée)
+    qa("SELECT s.id, s.nom, a.created_at, (a.nouvelles->>'email') AS email, (a.nouvelles->>'email_confirme')::boolean AS email_confirme FROM audit_log a JOIN schools s ON s.id=a.school_id WHERE a.action='inscription_ecole' AND a.created_at > now() - interval '30 days' ORDER BY a.created_at DESC LIMIT 10"),
   ]);
   const lignes = ecoles.map((s) => {
     const par_role = Object.fromEntries(ROLES_DASH.map(([k]) => [k, comptes.rows.find((x) => x.school_id === s.id && x.role === k)?.n || 0]));
@@ -157,6 +193,7 @@ r.get('/dashboard', ah(async (_req, res) => {
       dont_expirees: lignes.filter((l) => l.status !== 'suspended' && !l.ouverte).length,
     },
     roles: parRole,
+    inscriptions_recentes: inscr.rows,
     ecoles: lignes.sort((a, b) => b.utilisateurs - a.utilisateurs || a.label.localeCompare(b.label, 'fr')),
   });
 }));
@@ -184,7 +221,7 @@ r.put('/profil', ah(async (req, res) => {
     if (email !== moi.email) {
       // Changer l'identifiant de connexion exige le mot de passe actuel (une session volée ne suffit pas à prendre le compte)
       if (typeof b.mot_de_passe_actuel !== 'string' || !(await bcrypt.compare(b.mot_de_passe_actuel, moi.password_hash))) throw new HttpError(400, 'Mot de passe actuel requis et correct pour modifier l\'adresse e-mail');
-      if ((await qa('SELECT 1 FROM users WHERE email=$1 AND id<>$2', [email, moi.id])).rowCount) throw new HttpError(409, 'Cette adresse e-mail est déjà utilisée');
+      if ((await qa('SELECT 1 FROM users WHERE email=$1 AND id<>$2 AND school_id IS NULL AND deleted_at IS NULL', [email, moi.id])).rowCount) throw new HttpError(409, 'Cette adresse e-mail est déjà utilisée par un autre compte de la plateforme');
       d.email = email;
     }
   }
