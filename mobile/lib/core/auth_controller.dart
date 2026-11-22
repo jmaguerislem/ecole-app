@@ -7,13 +7,17 @@ class AppUser {
   final int id;
   final String email, role, nom, prenom;
   final String? schoolLabel;
+
+  /// Mot de passe provisoire (compte créé par l'administration) : à changer avant tout usage.
+  final bool mustChangePassword;
   const AppUser(
       {required this.id,
       required this.email,
       required this.role,
       required this.nom,
       required this.prenom,
-      this.schoolLabel});
+      this.schoolLabel,
+      this.mustChangePassword = false});
 
   factory AppUser.fromJson(Map<String, dynamic> j) {
     final school = j['school'];
@@ -25,6 +29,7 @@ class AppUser {
       prenom: '${j['prenom']}',
       schoolLabel:
           school is Map ? (school['label'] ?? school['nom'])?.toString() : null,
+      mustChangePassword: j['must_change_password'] == true,
     );
   }
 
@@ -74,13 +79,23 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> login(String email, String password) async {
-    final d = await api.post('/auth/login',
-        body: {'email': email.trim(), 'password': password}) as Map;
+  /// [school] (identifiant de l'école) n'est utile que si la même adresse et le même mot de passe existent dans plusieurs écoles.
+  Future<void> login(String email, String password, {String? school}) async {
+    final d = await api.post('/auth/login', body: {
+      'email': email.trim(),
+      'password': password,
+      if (school != null && school.isNotEmpty) 'school': school,
+    }) as Map;
     api.token = '${d['token']}';
     await TokenStore.write(api.token);
     user = AppUser.fromJson(Map<String, dynamic>.from(d['user'] as Map));
     sessionExpired = false;
+    notifyListeners();
+  }
+
+  /// Recharge le profil (par exemple après le changement du mot de passe provisoire).
+  Future<void> refreshUser() async {
+    user = AppUser.fromJson(await api.getMap('/auth/me'));
     notifyListeners();
   }
 

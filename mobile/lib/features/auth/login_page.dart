@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/api_client.dart';
 import '../../core/auth_controller.dart';
 import '../../core/env.dart';
 import '../../core/theme.dart';
@@ -20,6 +21,9 @@ class _LoginPageState extends State<LoginPage> {
   bool _busy = false;
   bool _hide = true;
   String? _error;
+  // Même adresse ET même mot de passe dans plusieurs écoles : le serveur demande laquelle (liste affichée sous le mot de passe)
+  List<Map<String, dynamic>>? _ecoles;
+  String? _school;
 
   @override
   void dispose() {
@@ -35,9 +39,19 @@ class _LoginPageState extends State<LoginPage> {
       _error = null;
     });
     try {
-      await AuthScope.of(context).login(_email.text, _password.text);
+      await AuthScope.of(context)
+          .login(_email.text, _password.text, school: _school);
     } catch (e) {
-      if (mounted) setState(() => _error = errorText(e));
+      if (!mounted) return;
+      if (e is ApiException && e.needsSchool) {
+        // Premier refus : on propose le choix sans message d'erreur ; ensuite, on affiche l'erreur éventuelle
+        setState(() {
+          _ecoles = e.ecoles;
+          _error = _school == null ? null : e.message;
+        });
+      } else {
+        setState(() => _error = errorText(e));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -100,6 +114,15 @@ class _LoginPageState extends State<LoginPage> {
                         keyboardType: TextInputType.emailAddress,
                         autofillHints: const [AutofillHints.username],
                         textInputAction: TextInputAction.next,
+                        onChanged: (_) {
+                          // Autre adresse : le choix d'école ne vaut plus
+                          if (_ecoles != null) {
+                            setState(() {
+                              _ecoles = null;
+                              _school = null;
+                            });
+                          }
+                        },
                         decoration: const InputDecoration(
                             labelText: 'Adresse e-mail',
                             prefixIcon: Icon(Icons.mail_outline)),
@@ -126,6 +149,30 @@ class _LoginPageState extends State<LoginPage> {
                             ? 'Saisissez votre mot de passe'
                             : null,
                       ),
+                      if (_ecoles != null) ...[
+                        const SizedBox(height: 14),
+                        DropdownButtonFormField<String>(
+                          key: ValueKey('ecole${_ecoles!.length}'),
+                          initialValue: _school,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                              labelText: 'Votre école',
+                              helperText:
+                                  'Cette adresse est utilisée dans plusieurs écoles : choisissez la vôtre.',
+                              helperMaxLines: 2,
+                              prefixIcon: Icon(Icons.apartment)),
+                          items: [
+                            for (final s in _ecoles!)
+                              DropdownMenuItem<String>(
+                                  value: '${s['slug']}',
+                                  child: Text('${s['nom']}',
+                                      overflow: TextOverflow.ellipsis)),
+                          ],
+                          onChanged: (v) => setState(() => _school = v),
+                          validator: (v) =>
+                              v == null ? 'Choisissez votre école' : null,
+                        ),
+                      ],
                       const SizedBox(height: 20),
                       BusyButton(
                           busy: _busy,

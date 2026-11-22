@@ -5,6 +5,7 @@ import 'core/auth_controller.dart';
 import 'core/env.dart';
 import 'core/theme.dart';
 import 'features/admin/admin_shell.dart';
+import 'features/auth/force_password_page.dart';
 import 'features/auth/login_page.dart';
 import 'features/family/family_shell.dart';
 import 'features/superadmin/superadmin_shell.dart';
@@ -71,6 +72,8 @@ class _AuthGate extends StatelessWidget {
     }
     final u = auth.user;
     if (u == null) return const LoginPage();
+    // Mot de passe provisoire : le serveur refuse tout le reste, on guide donc directement vers le changement obligatoire
+    if (u.mustChangePassword) return ForcePasswordPage(key: ValueKey('pw${u.id}'));
     switch (u.role) {
       case 'superadmin':
         return SuperAdminShell(key: ValueKey('sa${u.id}'));

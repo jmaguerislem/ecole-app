@@ -8,7 +8,7 @@ import 'sa_common.dart';
 import 'school_detail_page.dart';
 import 'school_form_page.dart';
 
-/// Page 2 : liste des écoles (ajout, détail, activation/désactivation).
+/// Page 2 : liste des écoles (ajout, détail, activation/désactivation, suppression).
 class SchoolsPage extends StatefulWidget {
   const SchoolsPage({super.key});
 
@@ -40,6 +40,25 @@ class _SchoolsPageState extends State<SchoolsPage> {
       if (mounted) {
         showOk(context, active ? 'École désactivée' : 'École activée');
       }
+      _refresh();
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
+  /// Suppression DÉFINITIVE (comptes, élèves, notes, paiements, messages, fichiers) : uniquement après confirmation.
+  Future<void> _delete(Map<String, dynamic> s) async {
+    final ok = await confirm(
+      context,
+      'Supprimer cette école ?',
+      '« ${s['label']} » sera supprimée définitivement avec ses ${toInt(s['nb_utilisateurs'])} compte(s) et ses ${toInt(s['nb_eleves'])} élève(s), ainsi que les notes, absences, paiements, messages et fichiers. Cette action est irréversible.',
+      action: 'Confirmer la suppression',
+      danger: true,
+    );
+    if (!ok) return;
+    try {
+      await api.delete('/saas/schools/${s['id']}', query: {'confirmer': 'oui'});
+      if (mounted) showOk(context, 'École supprimée');
       _refresh();
     } catch (e) {
       if (mounted) showError(context, e);
@@ -124,7 +143,7 @@ class _SchoolsPageState extends State<SchoolsPage> {
                               ]),
                               const SizedBox(height: 8),
                               Text(
-                                  '${toInt(s['nb_eleves'])} élèves · ${toInt(s['nb_utilisateurs'])} comptes · formule ${planLabels['${s['plan']}'] ?? s['plan']}',
+                                  '${toInt(s['nb_utilisateurs'])} comptes · formule ${planLabels['${s['plan']}'] ?? s['plan']}',
                                   style:
                                       const TextStyle(color: Colors.black54)),
                               if (s['subscription_end'] != null)
@@ -148,6 +167,16 @@ class _SchoolsPageState extends State<SchoolsPage> {
                                     value: active,
                                     onChanged: (_) => _toggle(s)),
                               ]),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton.icon(
+                                  onPressed: () => _delete(s),
+                                  icon: const Icon(Icons.delete_outline,
+                                      color: AppColors.bad),
+                                  label: const Text('Supprimer',
+                                      style: TextStyle(color: AppColors.bad)),
+                                ),
+                              ),
                             ]),
                       ),
                     ),
