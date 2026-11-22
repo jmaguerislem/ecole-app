@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'core/app_keys.dart';
 import 'core/auth_controller.dart';
 import 'core/env.dart';
 import 'core/theme.dart';
 import 'features/admin/admin_shell.dart';
-import 'features/auth/force_password_page.dart';
 import 'features/auth/login_page.dart';
 import 'features/family/family_shell.dart';
 import 'features/superadmin/superadmin_shell.dart';
@@ -20,7 +20,7 @@ class EcoleApp extends StatefulWidget {
 
 class _EcoleAppState extends State<EcoleApp> {
   final AuthController _auth = AuthController();
-  final GlobalKey<NavigatorState> _nav = GlobalKey<NavigatorState>();
+  final GlobalKey<NavigatorState> _nav = appNavigatorKey;
 
   @override
   void initState() {
@@ -44,6 +44,7 @@ class _EcoleAppState extends State<EcoleApp> {
       controller: _auth,
       child: MaterialApp(
         navigatorKey: _nav,
+        scaffoldMessengerKey: appMessengerKey,
         title: Env.appName,
         debugShowCheckedModeBanner: false,
         theme: buildTheme(),
@@ -72,8 +73,6 @@ class _AuthGate extends StatelessWidget {
     }
     final u = auth.user;
     if (u == null) return const LoginPage();
-    // Mot de passe provisoire : le serveur refuse tout le reste, on guide donc directement vers le changement obligatoire
-    if (u.mustChangePassword) return ForcePasswordPage(key: ValueKey('pw${u.id}'));
     switch (u.role) {
       case 'superadmin':
         return SuperAdminShell(key: ValueKey('sa${u.id}'));

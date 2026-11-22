@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../core/api_client.dart';
 import '../../core/format.dart';
 import '../../core/json.dart';
+import '../../core/notification_hub.dart';
+import '../../core/notification_router.dart';
 import '../../core/ui.dart';
 
 class NotificationsPage extends StatefulWidget {
@@ -25,6 +27,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
             onPressed: () async {
               try {
                 await api.post('/notifications/lu-tout');
+                NotificationHub.instance.refresh();
                 setState(() => _version++);
               } catch (e) {
                 if (context.mounted) showError(context, e);
@@ -65,14 +68,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   subtitle: Text(
                       '${str(n['corps'])}\n${dateTimeFr(n['created_at'])}'),
                   isThreeLine: true,
-                  onTap: lu
-                      ? null
-                      : () async {
-                          try {
-                            await api.post('/notifications/${n['id']}/lu');
-                            setState(() => _version++);
-                          } catch (_) {}
-                        },
+                  // Appui : marque lue (état partagé avec le site web) puis ouvre la page concernée
+                  onTap: () async {
+                    if (!lu) {
+                      try {
+                        await api.post('/notifications/${n['id']}/lu');
+                        NotificationHub.instance.refresh();
+                        if (mounted) setState(() => _version++);
+                      } catch (_) {}
+                    }
+                    final lien = n['lien']?.toString();
+                    if (lien != null && lien.isNotEmpty) {
+                      NotificationRouter.open(lien);
+                    }
+                  },
                 ),
               );
             },

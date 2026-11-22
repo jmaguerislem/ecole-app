@@ -37,8 +37,9 @@ async function notifierRetard(r) {
   const parents = (await q('SELECT parent_id FROM eleve_parents WHERE eleve_id=$1', [r.eleve_id])).rows.map((x) => x.parent_id);
   const jour = new Date(`${A.normDate(r.date_retard)}T12:00:00`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
   const motif = r.motif ? ` Motif indiqué : ${r.motif}.` : '';
-  await notify(parents, { type: 'retard', titre: `Retard de ${e.prenom} ${e.nom}`, corps: `${e.prenom} est arrivé(e) en retard (${r.minutes} min) le ${jour}.${motif}`, lien: '/retards' }, { email: true });
-  if (e.user_id) await notify([e.user_id], { type: 'retard', titre: 'Retard enregistré', corps: `Tu es arrivé(e) en retard (${r.minutes} min) le ${jour}.${motif}`, lien: '/retards' });
+  const cle = `retard:${r.eleve_id}:${A.normDate(r.date_retard)}`; // un seul retard par élève et par jour : même identité si l'appel est refait
+  await notify(parents, { type: 'retard', titre: `Retard de ${e.prenom} ${e.nom}`, corps: `${e.prenom} est arrivé(e) en retard (${r.minutes} min) le ${jour}.${motif}`, lien: '/retards', cle });
+  if (e.user_id) await notify([e.user_id], { type: 'retard', titre: 'Retard enregistré', corps: `Tu es arrivé(e) en retard (${r.minutes} min) le ${jour}.${motif}`, lien: '/retards', cle: `${cle}:eleve` }, { email: false });
 }
 
 // ----- Absences et remplacements des enseignants -----
@@ -63,7 +64,7 @@ async function notifierRemplacement(a) {
   const e = (await q("SELECT prenom||' '||nom n FROM users WHERE id=$1", [a.enseignant_id])).rows[0];
   const jour = new Date(`${A.normDate(a.date_absence)}T12:00:00`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
   const quand = { matin: 'le matin', apres_midi: "l'après-midi", journee: 'toute la journée' }[a.periode] || '';
-  await notify([a.remplacant_id], { type: 'remplacement', titre: 'Remplacement', corps: `Vous remplacez ${e?.n || 'un collègue'} le ${jour} (${quand}). Consultez l'emploi du temps pour ses classes.`, lien: '/emploi-du-temps' });
+  await notify([a.remplacant_id], { type: 'remplacement', titre: 'Remplacement', corps: `Vous remplacez ${e?.n || 'un collègue'} le ${jour} (${quand}). Consultez l'emploi du temps pour ses classes.`, lien: '/emploi-du-temps', cle: `remplacement:${a.id}:${a.remplacant_id}` });
 }
 
 // ----- Réclamations -----

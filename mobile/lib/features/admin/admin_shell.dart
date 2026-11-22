@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/auth_controller.dart';
+import '../../core/notification_bell.dart';
 import '../shared/account_page.dart';
 import 'admin_home_page.dart';
 import 'payments_page.dart';
@@ -61,6 +62,7 @@ class _AdminShellState extends State<AdminShell> {
     final i = _index.clamp(0, tabs.length - 1);
     return Scaffold(
       appBar: AppBar(
+          actions: const [NotificationBell()],
           title: Text(
               i == 0 ? (widget.user.schoolLabel ?? 'Accueil') : tabs[i].label)),
       body: KeyedSubtree(key: ValueKey(tabs[i].label), child: tabs[i].page()),

@@ -1,23 +1,22 @@
 import 'package:flutter/widgets.dart';
 
 import 'api_client.dart';
+import 'notification_hub.dart';
+import 'notification_router.dart';
+import 'push_service.dart';
 import 'token_store.dart';
 
 class AppUser {
   final int id;
   final String email, role, nom, prenom;
   final String? schoolLabel;
-
-  /// Mot de passe provisoire (compte créé par l'administration) : à changer avant tout usage.
-  final bool mustChangePassword;
   const AppUser(
       {required this.id,
       required this.email,
       required this.role,
       required this.nom,
       required this.prenom,
-      this.schoolLabel,
-      this.mustChangePassword = false});
+      this.schoolLabel});
 
   factory AppUser.fromJson(Map<String, dynamic> j) {
     final school = j['school'];
@@ -29,7 +28,6 @@ class AppUser {
       prenom: '${j['prenom']}',
       schoolLabel:
           school is Map ? (school['label'] ?? school['nom'])?.toString() : null,
-      mustChangePassword: j['must_change_password'] == true,
     );
   }
 
@@ -54,6 +52,7 @@ class AuthController extends ChangeNotifier {
   AppUser? user;
   bool ready = false;
   bool sessionExpired = false;
+  bool _loggingOut = false;
 
   AuthController() {
     api.onUnauthorized = () {
@@ -67,6 +66,7 @@ class AuthController extends ChangeNotifier {
       api.token = t;
       try {
         user = AppUser.fromJson(await api.getMap('/auth/me'));
+        _startNotifications();
       } on ApiException catch (e) {
         // Réseau coupé : on garde le jeton pour le prochain lancement ; sinon la session est invalide.
         if (e.status != 0) {
@@ -79,27 +79,36 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// [school] (identifiant de l'école) n'est utile que si la même adresse et le même mot de passe existent dans plusieurs écoles.
-  Future<void> login(String email, String password, {String? school}) async {
-    final d = await api.post('/auth/login', body: {
-      'email': email.trim(),
-      'password': password,
-      if (school != null && school.isNotEmpty) 'school': school,
-    }) as Map;
+  Future<void> login(String email, String password) async {
+    final d = await api.post('/auth/login',
+        body: {'email': email.trim(), 'password': password}) as Map;
     api.token = '${d['token']}';
     await TokenStore.write(api.token);
     user = AppUser.fromJson(Map<String, dynamic>.from(d['user'] as Map));
     sessionExpired = false;
     notifyListeners();
+    _startNotifications();
   }
 
-  /// Recharge le profil (par exemple après le changement du mot de passe provisoire).
-  Future<void> refreshUser() async {
-    user = AppUser.fromJson(await api.getMap('/auth/me'));
-    notifyListeners();
+  /// Pastille de non-lus + push FCM. Le propriétaire de la plateforme (sans école) n'a pas de notifications internes.
+  void _startNotifications() {
+    final u = user;
+    if (u == null || u.role == 'superadmin') return;
+    NotificationHub.instance.start();
+    PushService.instance.start().whenComplete(NotificationRouter.flushPending);
   }
 
   Future<void> logout({bool expired = false}) async {
+    if (_loggingOut) return; // une session expirée peut déclencher plusieurs 401 d'affilée
+    _loggingOut = true;
+    NotificationHub.instance.stop();
+    try {
+      // Avant d'effacer le jeton de session : le serveur doit retirer cet appareil des notifications de ce compte.
+      await PushService.instance
+          .stop(authenticated: !expired)
+          .timeout(const Duration(seconds: 4), onTimeout: () {});
+    } catch (_) {}
+    _loggingOut = false;
     api.token = null;
     user = null;
     sessionExpired = expired;

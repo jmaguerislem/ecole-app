@@ -26,14 +26,6 @@ class ApiException implements Exception {
           : null);
   bool get needsConfirmation => status == 409 && data['confirmable'] == true;
 
-  /// Même adresse e-mail ET même mot de passe dans plusieurs écoles : le serveur demande de choisir l'école (liste dans [ecoles]).
-  bool get needsSchool => status == 409 && data['code'] == 'school_required';
-  List<Map<String, dynamic>> get ecoles => _list(data['ecoles']);
-
-  /// Mot de passe provisoire : le serveur refuse tout le reste tant qu'il n'est pas changé.
-  bool get needsPasswordChange =>
-      status == 403 && data['code'] == 'password_change_required';
-
   static List<Map<String, dynamic>> _list(dynamic v) => v is List
       ? v.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
       : <Map<String, dynamic>>[];

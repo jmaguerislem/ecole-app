@@ -103,7 +103,7 @@ async function envoyerRelances(senderId) {
     const parents = await parentsOf(i.eleve_id);
     if (!parents.length) continue;
     await sendMessage({
-      sender_id: senderId, recipients: parents, eleve_id: i.eleve_id, email: true,
+      sender_id: senderId, recipients: parents, eleve_id: i.eleve_id,
       objet: `Rappel de paiement – ${i.prenom} ${i.nom}`,
       corps: `Bonjour,\n\nSauf erreur de notre part, un solde de ${i.solde.toFixed(2)} TND reste à régler pour ${i.prenom} ${i.nom} (année ${config.anneeCourante}).\nMerci de régulariser dès que possible.\n\nLe secrétariat`,
     });
@@ -141,7 +141,7 @@ const paiements = crud({
     const MODES = { especes: 'Espèces', virement: 'Virement', mobile_money: 'Mobile money' };
     const num = `REC-${anneeDebut(row.annee_scolaire)}-${pad(row.id)}`;
     await sendMessage({
-      sender_id: user.id, recipients: parents, eleve_id: row.eleve_id, email: true,
+      sender_id: user.id, recipients: parents, eleve_id: row.eleve_id,
       objet: `Paiement reçu – ${num}`,
       corps: `Bonjour,\n\nNous avons bien enregistré un paiement pour ${s.prenom} ${s.nom} :\n- Montant payé : ${Number(row.montant).toFixed(2)} TND\n- Date : ${row.date_paiement}\n- Mode : ${MODES[row.mode] || row.mode}\n- Nouveau solde restant : ${s.solde.toFixed(2)} TND\n\nTéléchargez votre reçu : ${config.appUrl}/recu/${row.id} (connexion requise).\n\nMerci.`,
     });
@@ -295,7 +295,7 @@ publicPre.post(['/preinscriptions', '/:slug/preinscriptions'], resoudreEcole, ah
      VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),$7,$8,$9,$10,$11,$12,TRUE) RETURNING id`,
     [config.anneeCourante, b.eleve_nom, b.eleve_prenom, b.date_naissance, b.sexe || '', b.niveau_souhaite || '', b.parent_nom, b.parent_prenom, b.parent_email, b.parent_telephone || null, b.adresse || null, b.antecedents_medicaux || null]);
   const admins = (await q("SELECT id FROM users WHERE role IN ('admin','comptable') AND actif AND deleted_at IS NULL")).rows.map((r) => r.id);
-  await notify(admins, { type: 'preinscription', titre: 'Nouvelle pré-inscription', corps: `${b.eleve_prenom} ${b.eleve_nom}`, lien: '/preinscriptions' });
+  await notify(admins, { type: 'preinscription', titre: 'Nouvelle pré-inscription', corps: `${b.eleve_prenom} ${b.eleve_nom}`, lien: '/preinscriptions', cle: `preinscription:${rows[0].id}` });
   res.status(201).json({ ok: true, id: rows[0].id });
 }));
 

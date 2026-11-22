@@ -80,11 +80,14 @@ async function notifierAbsence(a) {
   const jour = new Date(`${normDate(a.date_absence)}T12:00:00`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
   const quand = `le ${jour} (${QUAND[a.periode] || a.periode})`;
   const motif = a.motif ? ` Motif indiqué : ${a.motif}.` : '';
+  // Identité de l'événement = élève + jour + période : refaire l'appel (site ou application) ne renotifie pas les mêmes parents
+  const cle = `absence:${a.eleve_id}:${normDate(a.date_absence)}:${a.periode}`;
   await notify(parents, {
     type: 'absence', titre: `Absence de ${e.prenom} ${e.nom}`,
-    corps: `${e.prenom} a été noté(e) absent(e) ${quand}.${motif} Vous pouvez justifier cette absence depuis la page Absences.`, lien: '/absences',
-  }, { email: true });
-  if (e.user_id) await notify([e.user_id], { type: 'absence', titre: 'Absence enregistrée', corps: `Tu as été noté(e) absent(e) ${quand}.${motif}`, lien: '/absences' });
+    corps: `${e.prenom} a été noté(e) absent(e) ${quand}.${motif} Vous pouvez justifier cette absence depuis la page Absences.`, lien: '/absences', cle,
+  });
+  // Compte de l'élève : notification interne + push, jamais d'e-mail
+  if (e.user_id) await notify([e.user_id], { type: 'absence', titre: 'Absence enregistrée', corps: `Tu as été noté(e) absent(e) ${quand}.${motif}`, lien: '/absences', cle: `${cle}:eleve` }, { email: false });
 }
 
 module.exports = { notifierAbsence, PERIODES, MOTIF_MAX, JUSTIF_MAX, aujourdhui, normDate, checkDateAbsence, checkPeriode, checkMotif, checkJustification, checkEleveActif, checkDoublon };

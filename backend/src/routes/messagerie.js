@@ -45,6 +45,7 @@ messages.get('/', ah(async (req, res) => {
   res.json((await q(sql, [req.user.id])).rows);
 }));
 
+const ENVOIS = new Map(); // envois en cours (clé → promesse de l'id) : deux requêtes simultanées identiques ne créent qu'un message
 async function writeMessage(req, res, { existing } = {}) {
   const b = req.body;
   let dest;
@@ -66,25 +67,42 @@ async function writeMessage(req, res, { existing } = {}) {
     if (!root) throw new HttpError(403, 'Conversation inaccessible');
     thread = root.thread_id || root.id;
   }
-  let id;
-  if (existing) {
-    const attach = [...existing.attachments, ...files];
-    await q('UPDATE messages SET objet=$1, corps=$2, eleve_id=$3, thread_id=$4, attachments=$5, draft_recipients=$6 WHERE id=$7',
-      [b.objet || '(sans objet)', b.corps || '', b.eleve_id || null, thread, JSON.stringify(attach), JSON.stringify(dest), existing.id]);
-    id = existing.id;
-  } else {
-    id = (await q(`INSERT INTO messages(sender_id,thread_id,eleve_id,objet,corps,statut,attachments,draft_recipients) VALUES ($1,$2,$3,$4,$5,'brouillon',$6,$7) RETURNING id`,
-      [req.user.id, thread, b.eleve_id || null, b.objet || '(sans objet)', b.corps || '', JSON.stringify(files), JSON.stringify(dest)])).rows[0].id;
-  }
-  if (!brouillon) await dispatch(id, dest, req.user);
-  res.status(existing ? 200 : 201).json({ id, statut: brouillon ? 'brouillon' : 'envoye' });
+  const cleEnvoi = !brouillon && !existing ? `${req.user.id}|${thread || 0}|${[...new Set(dest)].sort((x, y) => x - y)}|${b.objet}|${b.corps}` : null;
+  if (cleEnvoi && ENVOIS.has(cleEnvoi)) { const idEnCours = await ENVOIS.get(cleEnvoi); if (idEnCours) return res.status(200).json({ id: idEnCours, statut: 'envoye', doublon: true }); }
+  let fin = () => {};
+  if (cleEnvoi) ENVOIS.set(cleEnvoi, new Promise((r) => { fin = r; }));
+  let id = null;
+  try {
+    // Ré-envoi accidentel (double clic sur le site, nouvelle tentative automatique de l'application après un délai réseau) :
+    // le même message, du même expéditeur, aux mêmes destinataires, dans les 30 dernières secondes n'est ni recréé ni renotifié.
+    if (!brouillon && !existing) {
+      const doublon = (await q(
+        `SELECT m.id FROM messages m WHERE m.sender_id=$1 AND m.statut='envoye' AND m.objet=$2 AND m.corps=$3 AND COALESCE(m.thread_id,0)=COALESCE($4::int,0)
+           AND m.sent_at > now() - interval '30 seconds'
+           AND COALESCE((SELECT array_agg(r.user_id ORDER BY r.user_id) FROM message_recipients r WHERE r.message_id=m.id), '{}') = $5::int[] LIMIT 1`,
+        [req.user.id, b.objet, b.corps, thread, [...new Set(dest)].sort((x, y) => x - y)])).rows[0];
+      if (doublon) return res.status(200).json({ id: doublon.id, statut: 'envoye', doublon: true });
+    }
+    if (existing) {
+      const attach = [...existing.attachments, ...files];
+      await q('UPDATE messages SET objet=$1, corps=$2, eleve_id=$3, thread_id=$4, attachments=$5, draft_recipients=$6 WHERE id=$7',
+        [b.objet || '(sans objet)', b.corps || '', b.eleve_id || null, thread, JSON.stringify(attach), JSON.stringify(dest), existing.id]);
+      id = existing.id;
+    } else {
+      id = (await q(`INSERT INTO messages(sender_id,thread_id,eleve_id,objet,corps,statut,attachments,draft_recipients) VALUES ($1,$2,$3,$4,$5,'brouillon',$6,$7) RETURNING id`,
+        [req.user.id, thread, b.eleve_id || null, b.objet || '(sans objet)', b.corps || '', JSON.stringify(files), JSON.stringify(dest)])).rows[0].id;
+    }
+    if (!brouillon) await dispatch(id, dest, req.user);
+    fin(id);
+    res.status(existing ? 200 : 201).json({ id, statut: brouillon ? 'brouillon' : 'envoye' });
+  } finally { if (cleEnvoi) { ENVOIS.delete(cleEnvoi); fin(null); } }
 }
 async function dispatch(id, dest, user) {
   const m = (await q("UPDATE messages SET statut='envoye', sent_at=now() WHERE id=$1 AND statut='brouillon' RETURNING objet,corps", [id])).rows[0];
   if (!m) throw new HttpError(409, 'Message déjà envoyé');
   for (const d of dest) await q('INSERT INTO message_recipients(message_id,user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, d]);
   await audit(null, user, 'send', 'messages', id, null, { destinataires: dest });
-  await notify(dest, { type: 'message', titre: `Nouveau message de ${user.prenom} ${user.nom}`, corps: m.objet, lien: `/messagerie/${id}` });
+  await notify(dest, { type: 'message', titre: `Nouveau message de ${user.prenom} ${user.nom}`, corps: m.objet, lien: `/messagerie/${id}`, cle: `message:${id}` });
 }
 
 messages.post('/', upload.array('fichiers', 5), ah((req, res) => writeMessage(req, res)));
@@ -160,7 +178,7 @@ annonces.post('/', allow('admin'), ah(async (req, res) => {
   await audit(null, req.user, 'create', 'annonces', a.id, null, a);
   const targets = audience === 'personne' ? ids.filter((i) => i !== req.user.id)
     : (await q(`SELECT id FROM users WHERE actif AND deleted_at IS NULL AND id<>$1 ${audience === 'tous' ? '' : 'AND role=$2'}`, audience === 'tous' ? [req.user.id] : [req.user.id, AUD_ROLE[audience]])).rows.map((r) => r.id);
-  notify(targets, { type: 'annonce', titre: `Annonce : ${titre}`, corps: corps.slice(0, 140), lien: '/annonces' }, { email: true }).catch(() => {});
+  notify(targets, { type: 'annonce', titre: `Annonce : ${titre}`, corps: corps.slice(0, 140), lien: '/annonces', cle: `annonce:${a.id}` }).catch(() => {});
   res.status(201).json(a);
 }));
 const immut = (_req, res) => res.status(403).json({ error: 'Une annonce publiée est immuable. Publiez une annonce corrective.' });
@@ -221,7 +239,7 @@ devoirs.post('/', allow('admin', 'enseignant'), upload.array('fichiers', 5), ah(
   const d = (await q(`INSERT INTO devoirs(titre,description,matiere_id,classe_id,enseignant_id,date_remise,bareme,fichiers,annee_scolaire) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
     [b.titre, b.description || null, b.matiere_id, b.classe_id, req.user.id, b.date_remise, b.bareme || 20, JSON.stringify(filesInfo(req.files)), config.anneeCourante])).rows[0];
   await audit(null, req.user, 'create', 'devoirs', d.id, null, d);
-  notify(await classAudience(d.classe_id), { type: 'devoir', titre: `Nouveau devoir : ${d.titre}`, corps: `À rendre avant le ${new Date(d.date_remise).toLocaleDateString('fr-FR')}`, lien: '/devoirs' }).catch(() => {});
+  notify(await classAudience(d.classe_id), { type: 'devoir', titre: `Nouveau devoir : ${d.titre}`, corps: `À rendre avant le ${new Date(d.date_remise).toLocaleDateString('fr-FR')}`, lien: '/devoirs', cle: `devoir:${d.id}` }).catch(() => {});
   res.status(201).json(d);
 }));
 devoirs.put('/:id(\\d+)', allow('admin', 'enseignant'), upload.array('fichiers', 5), ah(async (req, res) => {
@@ -262,7 +280,7 @@ devoirs.post('/:id(\\d+)/correction', allow('admin', 'enseignant'), upload.singl
   const info = filesInfo([req.file])[0];
   await q('UPDATE devoirs SET correction=$1 WHERE id=$2', [JSON.stringify(info), d.id]);
   await audit(null, req.user, 'update', 'devoirs', d.id, { correction: d.correction }, { correction: info });
-  notify(await classAudience(d.classe_id), { type: 'correction', titre: `Correction disponible : ${d.titre}`, corps: 'Visible après la date de remise.', lien: '/devoirs' }).catch(() => {});
+  notify(await classAudience(d.classe_id), { type: 'correction', titre: `Correction disponible : ${d.titre}`, corps: 'Visible après la date de remise.', lien: '/devoirs', cle: `correction:${d.id}` }).catch(() => {});
   res.json({ ok: true, correction: info });
 }));
 devoirs.get('/:id(\\d+)/depots', allow('admin', 'enseignant'), ah(async (req, res) => {

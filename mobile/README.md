@@ -62,3 +62,10 @@ Dépendances volontairement minimales : `http` et `flutter_secure_storage` (plus
 
 ## 6. Ce qui a été vérifié, et ce qui ne l'a pas été
 Vérifié automatiquement : analyse statique Dart sans erreur ni avertissement ; exécution du **vrai client API de l'app** contre le **vrai backend** (53 contrôles : rôles, finances, comptes parents, conflits d'emploi du temps, isolation entre familles). **Non vérifié** : le rendu visuel et le comportement des widgets sur émulateur, le build Gradle, l'envoi réel d'e-mails via votre SMTP. Voir `../MIGRATION_FLUTTER.md`.
+
+## Notifications push (Firebase FCM)
+La cloche de l'en-tête (pastille de non-lus) et la liste des notifications sont synchronisées avec le site web. Pour les push :
+1. Créez un projet Firebase, ajoutez une application Android dont l'identifiant est `applicationId` (`android/app/build.gradle.kts`).
+2. Téléchargez `google-services.json` dans `mobile/android/app/` (le plugin Google Services ne s'active que si ce fichier existe).
+3. Côté serveur, renseignez `FIREBASE_SERVICE_ACCOUNT` (voir `../docs/NOTIFICATIONS.md`).
+4. `flutter pub get` puis relancez. Si la résolution de `firebase_core` / `firebase_messaging` échoue : `flutter pub add firebase_core firebase_messaging`.

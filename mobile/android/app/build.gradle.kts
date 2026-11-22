@@ -4,6 +4,12 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Firebase Cloud Messaging : le plugin n'est appliqué que si le fichier de configuration du projet Firebase est présent.
+// Sans lui, l'application se compile et fonctionne normalement, simplement sans notifications push.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "com.example.ecole_mobile"
     compileSdk = flutter.compileSdkVersion

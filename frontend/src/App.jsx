@@ -83,9 +83,19 @@ function Layout({ children }) {
   const nav = useNavigate();
   useEffect(() => { setOpen(false); }, [loc.pathname]);
   useEffect(() => {
-    const f = () => api('/notifications/count').then((r) => setCount(r.non_lues)).catch(() => {});
-    f(); const t = setInterval(f, 30000); return () => clearInterval(t);
-  }, [loc.pathname]);
+    const f = () => api('/notifications/count').then((r) => setCount(Number(r.non_lues) || 0)).catch(() => {});
+    f(); const t = setInterval(f, 30000);
+    // Compteur partagé avec l'application mobile : remis à jour au retour sur l'onglet et dès qu'un push arrive
+    const vu = () => { if (document.visibilityState === 'visible') f(); };
+    const sw = (e) => {
+      const m = e.data || {};
+      if (m.type === 'notif:refresh') { f(); window.dispatchEvent(new Event('notif:refresh')); }
+      if (m.type === 'notif:ouvrir') { f(); window.dispatchEvent(new Event('notif:refresh')); if (typeof m.url === 'string' && m.url.startsWith('/') && !m.url.startsWith('//')) nav(m.url); }
+    };
+    document.addEventListener('visibilitychange', vu); window.addEventListener('focus', f);
+    navigator.serviceWorker?.addEventListener('message', sw);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', vu); window.removeEventListener('focus', f); navigator.serviceWorker?.removeEventListener('message', sw); };
+  }, [loc.pathname, nav]);
   // Tiroir mobile : Échap pour fermer, défilement de la page verrouillé tant qu'il est ouvert
   useEffect(() => {
     if (!open) return undefined;
@@ -142,7 +152,7 @@ function Notifications() {
   const [list, setList] = useState(null);
   const nav = useNavigate();
   const load = () => api('/notifications').then(setList).catch(() => setList([]));
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); window.addEventListener('notif:refresh', load); return () => window.removeEventListener('notif:refresh', load); }, []);
   const ouvrir = (n) => {
     api(`/notifications/${n.id}/lu`, { method: 'POST' }).catch(() => {});
     setList((l) => l.map((x) => (x.id === n.id ? { ...x, lu: true } : x)));

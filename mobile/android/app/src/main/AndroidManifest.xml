@@ -1,4 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Appels à l'API : indispensable en version release (le manifeste debug l'ajoute seul) -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Android 13+ : afficher les notifications push -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
         android:label="ecole_mobile"
         android:name="${applicationName}"

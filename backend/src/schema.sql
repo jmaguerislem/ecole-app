@@ -276,6 +276,9 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, lu);
+-- Identité de l'événement notifié : un même événement n'est jamais notifié deux fois à la même personne (site web ou application mobile)
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS cle TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_notif_cle ON notifications(user_id, cle) WHERE cle IS NOT NULL;
 CREATE TABLE IF NOT EXISTS notification_log (
   id SERIAL PRIMARY KEY,
   user_id INT REFERENCES users(id),

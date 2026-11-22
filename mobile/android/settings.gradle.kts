@@ -20,6 +20,8 @@ pluginManagement {
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
     id("com.android.application") version "9.1.0" apply false
+    // Firebase : actif seulement si android/app/google-services.json existe (voir build.gradle.kts de l'app)
+    id("com.google.gms.google-services") version "4.4.2" apply false
     id("org.jetbrains.kotlin.android") version "2.4.0" apply false
 }
 

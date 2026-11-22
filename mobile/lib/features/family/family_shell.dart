@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/api_client.dart';
 import '../../core/auth_controller.dart';
 import '../../core/json.dart';
+import '../../core/notification_bell.dart';
 import '../../core/ui.dart';
 import '../shared/account_page.dart';
 import '../shared/timetable_view.dart';
@@ -37,6 +38,7 @@ class _FamilyShellState extends State<FamilyShell> {
     ];
     return Scaffold(
       appBar: AppBar(
+          actions: const [NotificationBell()],
           title: Text(
               _index == 0 ? 'Bonjour ${widget.user.prenom}' : labels[_index])),
       body: IndexedStack(index: _index, children: [

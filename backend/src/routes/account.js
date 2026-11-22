@@ -145,7 +145,7 @@ priv.get('/notifications', ah(async (req, res) => {
   res.json(rows);
 }));
 priv.get('/notifications/count', ah(async (req, res) => {
-  const { rows } = await q('SELECT COUNT(*) n FROM notifications WHERE user_id=$1 AND NOT lu', [req.user.id]);
+  const { rows } = await q('SELECT COUNT(*)::int n FROM notifications WHERE user_id=$1 AND NOT lu', [req.user.id]);
   res.json({ non_lues: rows[0].n });
 }));
 priv.post('/notifications/lu-tout', ah(async (req, res) => { await q('UPDATE notifications SET lu=TRUE WHERE user_id=$1', [req.user.id]); res.json({ ok: true }); }));
@@ -159,6 +159,10 @@ priv.post('/push/subscribe', ah(async (req, res) => {
   if (!endpoint.startsWith('fcm:') && !/^https:\/\/[^\s]+$/.test(endpoint)) throw new HttpError(400, 'Abonnement invalide');
   if (!req.user.school_id) throw new HttpError(400, 'Notifications push indisponibles pour ce compte');
   await q('INSERT INTO push_subscriptions(user_id,endpoint,keys) VALUES ($1,$2,$3) ON CONFLICT (endpoint) DO UPDATE SET user_id=$1, keys=$3', [req.user.id, endpoint, JSON.stringify(keys)]);
+  // Un appareil = un seul abonnement : si l'application renvoie un nouveau jeton (réinstallation, rotation FCM), l'ancien est supprimé
+  // pour que le téléphone ne reçoive pas chaque notification deux fois (et qu'un ancien titulaire du téléphone n'en reçoive plus).
+  if (typeof keys.device === 'string' && /^[\w-]{8,100}$/.test(keys.device))
+    await q("DELETE FROM push_subscriptions WHERE keys->>'device'=$1 AND endpoint<>$2", [keys.device, endpoint]);
   res.json({ ok: true });
 }));
 

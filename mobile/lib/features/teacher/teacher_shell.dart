@@ -4,6 +4,7 @@ import '../../core/api_client.dart';
 import '../../core/auth_controller.dart';
 import '../../core/format.dart';
 import '../../core/json.dart';
+import '../../core/notification_bell.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../shared/account_page.dart';
@@ -55,6 +56,7 @@ class _TeacherShellState extends State<TeacherShell> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+          actions: const [NotificationBell()],
           title: Text(
               _index == 0 ? 'Bonjour ${widget.user.prenom}' : _labels[_index])),
       body: KeyedSubtree(key: ValueKey(_index), child: _page()),
